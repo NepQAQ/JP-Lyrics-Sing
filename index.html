@@ -23,6 +23,9 @@
       <h1>日语跟唱<span class="brand-sub">JP Lyrics Sing</span></h1>
     </div>
     <div class="header-actions">
+      <button id="btn-mode" class="mode-btn" aria-label="切换跳唱/阅读模式" title="切换跳唱/阅读模式">
+        <span class="mode-icon">🎤</span><span class="mode-text">跟唱</span>
+      </button>
       <button id="btn-theme" class="icon-btn" aria-label="切换主题" title="切换日间/夜间模式">
         <span class="theme-icon">🌙</span>
       </button>
@@ -40,11 +43,12 @@
     </div>
     <div id="search-results" class="search-results" hidden></div>
 
+    <div class="section-label">音频来源</div>
     <div class="source-tabs" role="tablist">
       <button class="tab active" data-tab="local" role="tab">📁 本地</button>
-      <button class="tab" data-tab="youtube" role="tab">▶️ YouTube</button>
       <button class="tab" data-tab="bilibili" role="tab">📺 Bilibili</button>
       <button class="tab" data-tab="timer" role="tab">⏱ 计时</button>
+      <button class="tab" data-tab="utaten" role="tab">🎌 UtaTen</button>
       <button class="tab" data-tab="lrc" role="tab">📝 LRC</button>
     </div>
 
@@ -56,17 +60,9 @@
       </label>
     </div>
 
-    <div class="tab-pane" data-pane="youtube">
-      <div class="row">
-        <input id="yt-url" type="text" placeholder="粘贴 YouTube 链接或 ID（例：https://youtu.be/x8VYWazR5mE）" />
-        <button id="btn-load-yt" class="primary">载入</button>
-      </div>
-      <p class="hint-sm">自动同步进度。若提示「错误 153」表示该视频禁止外站嵌入，请换一首或改用 Bilibili / 计时模式。</p>
-    </div>
-
     <div class="tab-pane" data-pane="bilibili">
       <div class="row">
-        <input id="bili-url" type="text" placeholder="粘贴 B 站链接（BV/av 都行，例：https://www.bilibili.com/video/BV1GJ411x7h7）" />
+        <input id="bili-url" type="text" placeholder="粘贴 B 站链接（例：https://www.bilibili.com/video/BV1GJ411x7h7）" />
         <button id="btn-load-bili" class="primary">载入</button>
       </div>
       <p class="hint-sm">B 站官方播放器不开放进度 API，将自动启用「计时模式」：在 B 站点播放的同时点 ▶ 开始即可，可用 ± 微调。</p>
@@ -82,6 +78,17 @@
       </div>
     </div>
 
+    <div class="tab-pane" data-pane="utaten">
+      <p class="hint-sm" style="margin-bottom:8px">
+        从 <a href="https://utaten.com" target="_blank" rel="noopener" style="color:var(--accent)">utaten.com</a> 获取高质量的汉字注音。点击结果会自动学习该歌的读音并应用到当前歌词（如未加载同步 LRC，则直接显示 UtaTen 纯文本歌词）。
+      </p>
+      <div class="row">
+        <input id="utaten-q" type="text" placeholder="歌名（如：夜に駆ける）" />
+        <button id="btn-utaten-search" class="primary">搜索</button>
+      </div>
+      <div id="utaten-results" class="search-results" hidden></div>
+    </div>
+
     <div class="tab-pane" data-pane="lrc">
       <label class="file-label block">
         <span class="file-cta">上传 LRC 文件</span>
@@ -95,6 +102,7 @@
       </div>
     </div>
 
+    <div class="section-label">显示设置</div>
     <div class="row toggles">
       <label class="chip"><input type="checkbox" id="show-furigana" checked /><span>假名</span></label>
       <label class="chip"><input type="checkbox" id="show-romaji" checked /><span>罗马音</span></label>
@@ -119,8 +127,8 @@
     <div class="hint-card">
       <div class="hint-emoji">🎵</div>
       <p><strong>欢迎！</strong></p>
-      <p>在上方搜索歌词，再选择音频来源（本地文件或 YouTube）即可开始跟唱。</p>
-      <p class="hint-sub">假名 / 罗马音由浏览器本地生成，歌词来源于 lrclib.net。</p>
+      <p>顶部搜索歌词 · 选择音频来源（本地文件 / Bilibili / 计时）· 点播放即可跟唱</p>
+      <p class="hint-sub">右上角 🎤 切换 <b>跟唱模式</b>（高亮当前句）与 <b>阅读模式</b>（清晰平铺全文）。</p>
     </div>
   </main>
 
@@ -133,9 +141,6 @@
   </div>
 
   <footer class="player-bar glass" id="player-bar">
-    <div id="yt-wrap" class="yt-wrap" hidden>
-      <div id="yt-player"></div>
-    </div>
     <div id="bili-wrap" class="yt-wrap" hidden>
       <iframe id="bili-iframe" src="" allowfullscreen allow="autoplay; fullscreen" scrolling="no" frameborder="0"></iframe>
     </div>

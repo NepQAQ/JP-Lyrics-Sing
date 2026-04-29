@@ -154,6 +154,27 @@ body {
 .theme-icon { transition: transform .4s cubic-bezier(.5,1.6,.5,1); display: inline-block; }
 .icon-btn:active .theme-icon { transform: rotate(180deg); }
 
+.mode-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 40px; padding: 0 14px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #07091c;
+  border: none; border-radius: 999px;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent);
+  transition: transform .12s, filter .2s, background .3s;
+}
+.mode-btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.mode-btn:active { transform: scale(0.96); }
+.mode-btn .mode-icon { font-size: 14px; }
+body.mode-read .mode-btn {
+  background: var(--chip-bg);
+  color: var(--text);
+  border: 1px solid var(--chip-border);
+  box-shadow: none;
+}
+
 /* ===== Panel ===== */
 .panel {
   margin: 12px;
@@ -240,6 +261,14 @@ button.primary:hover { filter: brightness(1.08); }
   background: linear-gradient(135deg, var(--accent), var(--accent-3));
   color: #07091c;
   letter-spacing: 0.5px;
+}
+
+/* ===== Section labels ===== */
+.section-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  margin: 4px 4px -2px;
 }
 
 /* ===== Source tabs ===== */
@@ -382,6 +411,30 @@ button.primary:hover { filter: brightness(1.08); }
   color: var(--active);
   text-shadow: 0 2px 18px color-mix(in srgb, var(--active) 40%, transparent);
 }
+
+/* Reading mode: all lines fully readable, current line subtly marked */
+body.mode-read .lrc-line {
+  opacity: 1;
+  filter: none;
+  text-align: left;
+  padding: 10px 16px;
+  margin: 4px auto;
+  border: 1px solid transparent;
+  cursor: default;
+  transform: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+body.mode-read .lrc-line:hover {
+  background: var(--hover) !important;
+  cursor: pointer;
+}
+body.mode-read .lrc-line.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+body.mode-read .lrc-line.active .jp { text-shadow: none; color: var(--text-strong); }
+body.mode-read .lyrics-view { padding-top: 8px; }
 
 .jp {
   font-family: "Zen Maru Gothic", "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;

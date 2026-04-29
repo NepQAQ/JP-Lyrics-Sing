@@ -419,22 +419,32 @@ body.mode-read .lrc-line {
   text-align: left;
   padding: 10px 16px;
   margin: 4px auto;
+  max-width: 760px;
   border: 1px solid transparent;
-  cursor: default;
+  cursor: pointer;
   transform: none !important;
   background: transparent !important;
   box-shadow: none !important;
 }
+body.mode-read .lrc-line .romaji,
+body.mode-read .lrc-line .zh { text-align: left; }
 body.mode-read .lrc-line:hover {
   background: var(--hover) !important;
-  cursor: pointer;
 }
 body.mode-read .lrc-line.active {
   background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
   border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 body.mode-read .lrc-line.active .jp { text-shadow: none; color: var(--text-strong); }
-body.mode-read .lyrics-view { padding-top: 8px; }
+body.mode-read .lyrics-view {
+  padding: 8px 16px 32px;
+  max-width: 920px;
+  margin: 0 auto;
+  width: 100%;
+}
+@media (min-width: 720px) {
+  body.mode-read .lyrics-view { padding: 12px 24px 40px; }
+}
 
 .jp {
   font-family: "Zen Maru Gothic", "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
@@ -475,6 +485,17 @@ body.mode-read .lyrics-view { padding-top: 8px; }
   border-radius: 0;
   border-left: none; border-right: none; border-bottom: none;
   box-shadow: 0 -8px 32px rgba(0,0,0,0.30);
+  transform: translateY(0);
+  transition: transform .3s ease, opacity .3s ease;
+}
+body.no-player .player-bar {
+  transform: translateY(110%);
+  opacity: 0;
+  pointer-events: none;
+}
+body.no-player .lyrics-view { padding-bottom: 32px; }
+@media (min-width: 720px) {
+  body.no-player .lyrics-view { padding-bottom: 40px; }
 }
 #audio { width: 100%; height: 40px; }
 #audio::-webkit-media-controls-panel {

@@ -52,6 +52,12 @@ $('#btn-mode')?.addEventListener('click', () => {
   applyMode(next);
 });
 
+/* Show/hide player bar based on whether any audio source is active. */
+function setPlayerVisible(visible) {
+  document.body.classList.toggle('no-player', !visible);
+}
+setPlayerVisible(false); // default: no source
+
 /* ---------------- UI helpers ---------------- */
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg || '';
@@ -484,6 +490,7 @@ $('#audio-file').addEventListener('change', (e) => {
   switchToAudioMode();
   audio.src = URL.createObjectURL(f);
   $('#audio-file-name').textContent = f.name;
+  setPlayerVisible(true);
   setStatus(`已加载音频: ${f.name}`);
 });
 
@@ -610,6 +617,8 @@ function switchToAudioMode() {
   $('#bili-wrap').hidden = true;
   if (player.yt) { try { player.yt.stopVideo(); } catch {} }
   $('#bili-iframe').src = '';
+  // Only show player bar if an audio file is actually loaded
+  setPlayerVisible(!!audio.src);
 }
 
 async function switchToYouTubeMode(videoId) {
@@ -653,6 +662,7 @@ function switchToBilibiliMode(bvid) {
   player.timerOffset = 0;
   player.timerRunning = false;
   showTimerHud();
+  setPlayerVisible(true);
   startPolling();
   setStatus('Bilibili 已载入。在 B 站播放器点播放的同时，点 ▶ 启动计时即可同步歌词。');
 }
@@ -668,6 +678,7 @@ function switchToTimerMode() {
   player.timerOffset = 0;
   player.timerRunning = false;
   showTimerHud();
+  setPlayerVisible(false);  // timer mode doesn't need the audio bar
   startPolling();
   setStatus('计时模式：在外部播放器开始的同时点 ▶ 启动。');
 }

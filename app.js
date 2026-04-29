@@ -8,6 +8,9 @@ const lyricsView = $('#lyrics-view');
 const statusEl = $('#status');
 const searchInput = $('#search-input');
 const searchResults = $('#search-results');
+const biliWrap = $('#bili-wrap');
+let searchRequestId = 0;
+let biliSearchRequestId = 0;
 
 let kuroshiro = null;
 let kuroshiroReady = null;
@@ -64,6 +67,10 @@ function setStatus(msg, isError = false) {
   statusEl.classList.toggle('error', !!isError);
 }
 
+function setPanelCollapsed(collapsed) {
+  $('#panel').classList.toggle('hidden', collapsed);
+}
+
 function applyToggleClasses() {
   const hideF = !$('#show-furigana').checked;
   const hideR = !$('#show-romaji').checked;
@@ -79,15 +86,34 @@ function applyToggleClasses() {
 });
 
 $('#btn-toggle-panel').addEventListener('click', () => {
-  $('#panel').classList.toggle('hidden');
+  setPanelCollapsed(!$('#panel').classList.contains('hidden'));
 });
 
 /* ---------------- Tabs ---------------- */
+function activateSourceTab(target) {
+  $$('.source-tabs .tab').forEach(b => b.classList.toggle('active', b.dataset.tab === target));
+  $$('.tab-pane').forEach(p => p.classList.toggle('active', p.dataset.pane === target));
+}
+
 $$('.source-tabs .tab').forEach(btn => {
   btn.addEventListener('click', () => {
-    const target = btn.dataset.tab;
-    $$('.source-tabs .tab').forEach(b => b.classList.toggle('active', b === btn));
-    $$('.tab-pane').forEach(p => p.classList.toggle('active', p.dataset.pane === target));
+    activateSourceTab(btn.dataset.tab);
+  });
+});
+
+/* Sub-tabs (inside a main tab pane, e.g. 本地 -> 音频/LRC) */
+$$('.sub-tabs').forEach(group => {
+  const tabs = group.querySelectorAll('.sub-tab');
+  // Sub-panes are siblings of the .sub-tabs container, sharing its parent.
+  const scope = group.parentElement;
+  tabs.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.subtab;
+      tabs.forEach(b => b.classList.toggle('active', b === btn));
+      scope.querySelectorAll(':scope > .sub-pane').forEach(p =>
+        p.classList.toggle('active', p.dataset.subpane === target)
+      );
+    });
   });
 });
 
@@ -170,14 +196,40 @@ async function toFurigana(text) {
   for (const seg of segments) {
     if (seg.type === 'override') {
       html += `<ruby>${escapeHTML(seg.kanji)}<rt>${escapeHTML(seg.kana)}</rt></ruby>`;
-      romajiParts.push(seg.romaji);
+      if (seg.romaji) romajiParts.push(seg.romaji);
     } else {
       const t = seg.text;
       if (!t) continue;
-      const h = await k.convert(t, { to: 'hiragana', mode: 'furigana' });
-      const r = await k.convert(t, { to: 'romaji', mode: 'spaced', romajiSystem: 'hepburn' });
-      html += h;
-      if (r) romajiParts.push(r.trim());
+      // furigana html
+      let h = '';
+      try {
+        h = await k.convert(t, { to: 'hiragana', mode: 'furigana' });
+      } catch (e) {
+        console.warn('[furigana] convert failed:', e);
+      }
+      html += h || escapeHTML(t);
+      // romaji — try spaced first, fall back to normal mode, then to a kana-based map.
+      let r = '';
+      try {
+        r = await k.convert(t, { to: 'romaji', mode: 'spaced', romajiSystem: 'hepburn' });
+      } catch (e) {
+        console.warn('[romaji spaced] failed:', e);
+      }
+      if (!r || !r.trim()) {
+        try {
+          r = await k.convert(t, { to: 'romaji', mode: 'normal', romajiSystem: 'hepburn' });
+        } catch (e) {
+          console.warn('[romaji normal] failed:', e);
+        }
+      }
+      if (!r || !r.trim()) {
+        // Final fallback: convert to hiragana then map to romaji manually.
+        try {
+          const hira = await k.convert(t, { to: 'hiragana', mode: 'normal' });
+          r = kanaToRomajiSimple(hira);
+        } catch {}
+      }
+      if (r && r.trim()) romajiParts.push(r.trim());
     }
   }
   return { html, romaji: romajiParts.join(' ').replace(/\s+/g, ' ').trim() };
@@ -331,6 +383,30 @@ loadOverrides();
 
 /* Overrides UI wiring (after DOM is parsed by script-at-end) */
 renderOverridesTextarea();
+function setOverridesPopoverOpen(open) {
+  const popover = $('#overrides-popover');
+  const btn = $('#btn-overrides-panel');
+  if (!popover || !btn) return;
+  popover.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+  if (open) $('#overrides-text')?.focus();
+}
+
+$('#btn-overrides-panel')?.addEventListener('click', (ev) => {
+  ev.stopPropagation();
+  const popover = $('#overrides-popover');
+  setOverridesPopoverOpen(popover?.hidden !== false);
+});
+$('#btn-close-overrides')?.addEventListener('click', () => setOverridesPopoverOpen(false));
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') setOverridesPopoverOpen(false);
+});
+document.addEventListener('click', (ev) => {
+  const popover = $('#overrides-popover');
+  if (!popover || popover.hidden) return;
+  if (popover.contains(ev.target) || $('#btn-overrides-panel')?.contains(ev.target)) return;
+  setOverridesPopoverOpen(false);
+});
 $('#btn-save-overrides')?.addEventListener('click', () => {
   applyOverridesFromTextarea();
 });
@@ -390,6 +466,10 @@ async function renderLyrics(parsed) {
   }
   setStatus(`解析到 ${parsed.length} 行，正在生成假名/罗马音...`);
 
+  const topSpacer = document.createElement('div');
+  topSpacer.className = 'lrc-spacer lrc-spacer-top';
+  lyricsView.appendChild(topSpacer);
+
   for (let i = 0; i < parsed.length; i++) {
     const p = parsed[i];
     const el = document.createElement('div');
@@ -404,6 +484,11 @@ async function renderLyrics(parsed) {
     lyricsView.appendChild(el);
     lrcLines.push({ ...p, el });
   }
+
+  const bottomSpacer = document.createElement('div');
+  bottomSpacer.className = 'lrc-spacer lrc-spacer-bottom';
+  lyricsView.appendChild(bottomSpacer);
+
   applyToggleClasses();
 
   const autoTranslate = $('#auto-translate').checked;
@@ -480,6 +565,7 @@ const player = {
     } else {
       this.timerBase = performance.now();
       this.timerRunning = true;
+      setPanelCollapsed(true);
     }
     updateTimerHud();
   },
@@ -501,6 +587,7 @@ audio.addEventListener('timeupdate', () => syncHighlight(audio.currentTime));
 
 /* YouTube / timer polling ticker */
 let pollTicker = null;
+let lastAutoCenterAt = 0;
 function startPolling() {
   stopPolling();
   pollTicker = setInterval(() => {
@@ -510,6 +597,20 @@ function startPolling() {
   }, 100);
 }
 function stopPolling() { if (pollTicker) { clearInterval(pollTicker); pollTicker = null; } }
+
+function isPlaybackActive() {
+  if (player.mode === 'timer') return player.timerRunning;
+  if (player.mode === 'audio') return !audio.paused && !audio.ended;
+  return false;
+}
+
+function shouldCenterLyrics() {
+  return !document.body.classList.contains('mode-read') && isPlaybackActive();
+}
+
+function getLyricFocusRatio() {
+  return 0.38;
+}
 
 function syncHighlight(t) {
   if (!lrcLines.length) return;
@@ -526,15 +627,35 @@ function syncHighlight(t) {
     if (idx >= 0) {
       const el = lrcLines[idx].el;
       el.classList.add('active');
-      // Don't auto-scroll in reading mode
-      if (document.body.classList.contains('mode-read')) return;
-      const rect = el.getBoundingClientRect();
-      const viewRect = lyricsView.getBoundingClientRect();
-      const offset = rect.top - viewRect.top - viewRect.height / 2 + rect.height / 2;
-      lyricsView.scrollBy({ top: offset, behavior: 'smooth' });
+      if (shouldCenterLyrics()) centerActiveLyric(el);
     }
+  } else if (idx >= 0 && shouldCenterLyrics()) {
+    const now = performance.now();
+    if (now - lastAutoCenterAt > 650) centerActiveLyric(lrcLines[idx].el);
   }
 }
+
+function centerActiveLyric(el, behavior = 'auto') {
+  lastAutoCenterAt = performance.now();
+  const rect = el.getBoundingClientRect();
+  const viewRect = lyricsView.getBoundingClientRect();
+  const targetY = viewRect.height * getLyricFocusRatio();
+  const offset = rect.top - viewRect.top - targetY + rect.height / 2;
+  const nextTop = Math.max(0, Math.min(
+    lyricsView.scrollHeight - lyricsView.clientHeight,
+    lyricsView.scrollTop + offset
+  ));
+  if (behavior === 'smooth') {
+    lyricsView.scrollTo({ top: nextTop, behavior });
+  } else {
+    lyricsView.scrollTop = nextTop;
+  }
+}
+
+audio.addEventListener('play', () => {
+  setPanelCollapsed(true);
+  syncHighlight(audio.currentTime);
+});
 
 /* ---------------- File inputs ---------------- */
 $('#audio-file').addEventListener('change', (e) => {
@@ -588,34 +709,268 @@ searchInput.addEventListener('keydown', (e) => {
 async function doSearch() {
   const q = searchInput.value.trim();
   if (!q) return;
+  const requestId = ++searchRequestId;
   setStatus('搜索中...');
   searchResults.hidden = false;
   searchResults.innerHTML = '<div style="padding:12px;color:var(--muted)">搜索中...</div>';
+
+  // Run lrclib only; UtaTen is opened directly on the official site because
+  // cross-origin proxy solutions have become unreliable in the browser.
+  const lrclibPromise = fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`)
+    .then(r => r.json())
+    .catch(e => { console.warn('[lrclib]', e); return { __error: e.message }; });
+  let data;
   try {
-    const r = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`);
-    const data = await r.json();
-    if (!Array.isArray(data) || !data.length) {
-      searchResults.innerHTML = '<div style="padding:12px;color:var(--muted)">未找到结果。换个关键词试试？</div>';
-      setStatus('');
-      return;
-    }
-    searchResults.innerHTML = '';
-    data.slice(0, 30).forEach(item => {
+    data = await lrclibPromise;
+  } catch (e) {
+    if (requestId !== searchRequestId) return;
+    searchResults.innerHTML = `<div style="padding:12px;color:var(--danger)">搜索失败：${escapeHTML(e.message)}</div>`;
+    setStatus('搜索失败', true);
+    return;
+  }
+
+  const lrcList = Array.isArray(data) ? data : [];
+  if (requestId !== searchRequestId) return;
+
+  searchResults.innerHTML = '';
+
+  if (!lrcList.length) {
+    const empty = document.createElement('div');
+    empty.style.padding = '12px';
+    empty.style.color = 'var(--muted)';
+    empty.textContent = '未找到歌词。换个关键词试试？';
+    searchResults.appendChild(empty);
+  } else {
+    const head = document.createElement('div');
+    head.className = 'search-section-head';
+    head.textContent = '歌词结果';
+    searchResults.appendChild(head);
+
+    lrcList.slice(0, 16).forEach(item => {
       const div = document.createElement('div');
       div.className = 'result-item';
       const synced = !!item.syncedLyrics;
       div.innerHTML = `
         <div class="title">${escapeHTML(item.trackName || '(无标题)')} ${synced ? '<span class="badge">同步</span>' : ''}</div>
         <div class="meta">${escapeHTML(item.artistName || '')} · ${escapeHTML(item.albumName || '')} · ${formatDur(item.duration)}</div>
+        <div class="row-actions">
+          <button class="btn-mini" data-act="utaten">🎼 UtaTen</button>
+        </div>
       `;
-      div.addEventListener('click', () => loadFromLrclib(item));
+      // Click on body (excluding action buttons) loads lyrics
+      div.addEventListener('click', (ev) => {
+        if (ev.target.closest('.row-actions')) return;
+        loadFromLrclib(item);
+      });
+      const utaBtn = div.querySelector('[data-act="utaten"]');
+      utaBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        openUtatenSearchForItem(item);
+      });
       searchResults.appendChild(div);
     });
-    setStatus(`找到 ${data.length} 条结果，点击载入`);
-  } catch (e) {
-    searchResults.innerHTML = `<div style="padding:12px;color:var(--danger)">搜索失败：${escapeHTML(e.message)}</div>`;
-    setStatus('搜索失败', true);
   }
+
+  setStatus(lrcList.length ? `找到 ${lrcList.length} 条歌词` : '未找到歌词');
+}
+
+function setBiliSearchPopoverOpen(open) {
+  const popover = $('#bili-search-popover');
+  if (!popover) return;
+  popover.hidden = !open;
+}
+
+function renderBiliSearchResults(items, query) {
+  const list = $('#bili-search-results');
+  if (!list) return;
+  list.innerHTML = '';
+  if (Array.isArray(items) && items.length) {
+    const sec = document.createElement('div');
+    sec.className = 'bili-section';
+    sec.innerHTML = `<div class="utaten-head">📺 ${escapeHTML(query)} 的 Bilibili 候选视频</div>`;
+    items.slice(0, 12).forEach(it => {
+      const div = document.createElement('div');
+      div.className = 'result-item bili-result';
+      div.innerHTML = `
+        ${it.cover ? `<img class="bili-cover" src="${escapeHTML(it.cover)}" alt="" loading="lazy" />` : '<div class="bili-cover bili-cover-empty">BV</div>'}
+        <div class="bili-info">
+          <div class="title">${escapeHTML(it.title)} <span class="badge">BV</span></div>
+          <div class="meta">${escapeHTML([it.author, it.duration, it.bvid].filter(Boolean).join(' · '))}</div>
+        </div>
+      `;
+      div.addEventListener('click', () => {
+        selectBilibiliSearchResult(it);
+        setBiliSearchPopoverOpen(false);
+      });
+      sec.appendChild(div);
+    });
+    list.appendChild(sec);
+    return;
+  }
+  const empty = document.createElement('div');
+  empty.style.padding = '12px';
+  empty.style.color = 'var(--muted)';
+  empty.textContent = '没有找到可用的 B 站视频结果。';
+  list.appendChild(empty);
+}
+
+async function openBilibiliSearchPopoverForLyric(item) {
+  const list = $('#bili-search-results');
+  const subtitle = $('#bili-search-subtitle');
+  if (!list || !subtitle) return;
+  const query = `${item.trackName || ''} ${item.artistName || ''}`.trim() || item.trackName || item.artistName || '';
+  const requestId = ++biliSearchRequestId;
+  subtitle.textContent = query || '为当前歌词选择 B 站音源';
+  setBiliSearchPopoverOpen(true);
+  list.innerHTML = '<div style="padding:12px;color:var(--muted)">正在搜索 Bilibili 视频...</div>';
+  const items = await searchBilibiliVideos(query);
+  if (requestId !== biliSearchRequestId) return;
+  if (Array.isArray(items) && items.length) {
+    renderBiliSearchResults(items, query);
+    setStatus(`歌词已载入 · 找到 ${items.length} 条 B 站候选视频`);
+  } else {
+    list.innerHTML = `<div style="padding:12px;color:var(--muted)">Bilibili 搜索暂不可用${items?.__error ? `：${escapeHTML(items.__error)}` : ''}</div>`;
+    setStatus('歌词已载入；Bilibili 搜索暂不可用', true);
+  }
+}
+
+function selectBilibiliSearchResult(item) {
+  const bvid = parseBilibiliId(item?.bvid || '');
+  if (!bvid) {
+    setStatus('选中的 B 站结果没有可用 BV 号', true);
+    return;
+  }
+  $('#bili-url').value = bvid;
+  activateSourceTab('bilibili');
+  switchToBilibiliMode(bvid);
+  searchResults.hidden = true;
+  setStatus(`已选择 B 站视频：${item?.title || bvid} · ${bvid}`);
+}
+
+async function searchBilibiliVideos(query) {
+  let lastError = null;
+  try {
+    const url = `https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=${encodeURIComponent(query)}`;
+    const apiItems = await fetchBilibiliApiItems(url);
+    if (apiItems.length) return apiItems;
+  } catch (e) {
+    console.warn('[bilibili]', e);
+    lastError = e;
+  }
+  try {
+    const htmlItems = await searchBilibiliViaAllOrigins(query);
+    if (htmlItems.length) return htmlItems;
+  } catch (e) {
+    console.warn('[bilibili html]', e);
+    lastError = e;
+  }
+  try {
+    const fallback = await searchBilibiliViaReader(query);
+    if (fallback.length) return fallback;
+  } catch (e) {
+    console.warn('[bilibili reader]', e);
+    lastError = e;
+  }
+  return { __error: lastError?.message || '没有返回视频结果' };
+}
+
+async function fetchBilibiliApiItems(url) {
+  const r = await fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer' });
+  if (!r.ok) throw new Error('网络错误 ' + r.status);
+  const data = await r.json();
+  const list = Array.isArray(data?.data?.result) ? data.data.result : [];
+  return list
+    .filter(item => item.bvid)
+    .map(item => ({
+      bvid: item.bvid,
+      title: stripHTML(item.title || item.bvid),
+      author: stripHTML(item.author || ''),
+      duration: item.duration || '',
+      cover: normalizeBiliCover(item.pic || ''),
+    }));
+}
+
+async function searchBilibiliViaReader(query) {
+  const searchUrl = `https://search.bilibili.com/all?keyword=${encodeURIComponent(query)}`;
+  const r = await fetch('https://r.jina.ai/' + searchUrl, {
+    headers: { 'Accept': 'text/plain' }
+  });
+  if (!r.ok) throw new Error('网页读取失败 ' + r.status);
+  const text = await r.text();
+  return parseBilibiliReaderResults(text);
+}
+
+async function searchBilibiliViaAllOrigins(query) {
+  const searchUrl = `https://search.bilibili.com/all?keyword=${encodeURIComponent(query)}`;
+  const r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(searchUrl));
+  if (!r.ok) throw new Error('网页代理失败 ' + r.status);
+  const html = await r.text();
+  return parseBilibiliHtmlResults(html);
+}
+
+function parseBilibiliHtmlResults(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const out = [];
+  const seen = new Set();
+  doc.querySelectorAll('a[href*="/video/BV"]').forEach(a => {
+    const href = a.getAttribute('href') || '';
+    const bv = href.match(/BV[\w]{10}/)?.[0];
+    if (!bv || seen.has(bv)) return;
+    const card = a.closest('li, .video-list-item, .bili-video-card, .video-item') || a.parentElement;
+    const img = card?.querySelector('img') || a.querySelector('img');
+    const title = stripHTML(a.getAttribute('title') || a.textContent || bv).replace(/\s+/g, ' ').trim();
+    let author = '';
+    const authorEl = card?.querySelector('a[href*="space.bilibili.com"], .up-name, .bili-video-card__info--author');
+    if (authorEl) author = stripHTML(authorEl.textContent || '').replace(/\s+/g, ' ').trim();
+    let cover = img?.getAttribute('src') || img?.getAttribute('data-src') || '';
+    if (!cover) {
+      const raw = card?.innerHTML || '';
+      cover = raw.match(/https?:\\?\/\\?\/[^"'<>]+?\.(?:jpg|jpeg|png|webp)[^"'<>]*/i)?.[0] || '';
+    }
+    seen.add(bv);
+    out.push({ bvid: bv, title: title || bv, author, duration: '', cover: normalizeBiliCover(cover.replace(/\\\//g, '/')) });
+  });
+  return out.slice(0, 12);
+}
+
+function parseBilibiliReaderResults(text) {
+  const out = [];
+  const seen = new Set();
+  const lines = text.split(/\r?\n/);
+  let recentCover = '';
+  const imageRe = /!\[[^\]]*\]\(([^)]+(?:hdslb|bili)[^)]*)\)/i;
+  const videoRe = /\[([^\]\n]{2,120})\]\((https?:\/\/www\.bilibili\.com\/video\/(BV[\w]{10})[^)]*)\)/i;
+  for (const line of lines) {
+    const img = line.match(imageRe);
+    if (img) recentCover = normalizeBiliCover(img[1]);
+    const video = line.match(videoRe);
+    if (!video) continue;
+    const [, rawTitle, , bvid] = video;
+    if (seen.has(bvid)) continue;
+    seen.add(bvid);
+    out.push({
+      bvid,
+      title: stripHTML(rawTitle).replace(/\s+/g, ' ').trim() || bvid,
+      author: '',
+      duration: '',
+      cover: recentCover,
+    });
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+function stripHTML(s) {
+  const div = document.createElement('div');
+  div.innerHTML = s;
+  return div.textContent || div.innerText || '';
+}
+
+function normalizeBiliCover(url) {
+  if (!url) return '';
+  if (url.startsWith('//')) return 'https:' + url;
+  if (url.startsWith('http://')) return url.replace(/^http:\/\//, 'https://');
+  return url;
 }
 
 function formatDur(sec) {
@@ -631,6 +986,7 @@ async function loadFromLrclib(item) {
   $('#lrc-text').value = lrc;
   setStatus(`载入：${item.trackName} - ${item.artistName}`);
   await loadLrcFromText(lrc);
+  openBilibiliSearchPopoverForLyric(item);
 }
 
 /* ---------------- YouTube ---------------- */
@@ -667,7 +1023,7 @@ function switchToAudioMode() {
   hideTimerHud();
   audio.style.display = '';
   const yw = $('#yt-wrap'); if (yw) yw.hidden = true;
-  $('#bili-wrap').hidden = true;
+  biliWrap.hidden = true;
   if (player.yt) { try { player.yt.stopVideo(); } catch {} }
   $('#bili-iframe').src = '';
   // Only show player bar if an audio file is actually loaded
@@ -678,8 +1034,8 @@ async function switchToYouTubeMode(videoId) {
   player.mode = 'yt';
   audio.pause();
   audio.style.display = 'none';
-  $('#yt-wrap').hidden = false;
-  $('#bili-wrap').hidden = true;
+  const yw = $('#yt-wrap'); if (yw) yw.hidden = false;
+  biliWrap.hidden = true;
   $('#bili-iframe').src = '';
   hideTimerHud();
   await loadYouTubeAPI();
@@ -709,7 +1065,8 @@ function switchToBilibiliMode(bvid) {
   audio.style.display = 'none';
   const yw = $('#yt-wrap'); if (yw) yw.hidden = true;
   if (player.yt) { try { player.yt.stopVideo(); } catch {} }
-  $('#bili-wrap').hidden = false;
+  biliWrap.hidden = false;
+  setBiliPlayerCollapsed(localStorage.getItem('jplrc-bili-collapsed') !== '0');
   // Use the official embed; high_quality=1, autoplay off (user starts manually to align with timer)
   $('#bili-iframe').src = `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(bvid)}&high_quality=1&danmaku=0&autoplay=0`;
   player.timerOffset = 0;
@@ -725,7 +1082,7 @@ function switchToTimerMode() {
   audio.pause();
   audio.style.display = 'none';
   const yw = $('#yt-wrap'); if (yw) yw.hidden = true;
-  $('#bili-wrap').hidden = true;
+  biliWrap.hidden = true;
   if (player.yt) { try { player.yt.stopVideo(); } catch {} }
   $('#bili-iframe').src = '';
   player.timerOffset = 0;
@@ -763,6 +1120,21 @@ $('#btn-timer-reset').addEventListener('click', () => {
 });
 $('#btn-timer-back').addEventListener('click', () => player.timerNudge(-0.5));
 $('#btn-timer-fwd').addEventListener('click', () => player.timerNudge(+0.5));
+
+function setBiliPlayerCollapsed(collapsed) {
+  biliWrap.classList.toggle('bili-collapsed', collapsed);
+  const btn = $('#btn-toggle-bili-player');
+  if (btn) {
+    btn.textContent = collapsed ? '展开' : '收起';
+    btn.setAttribute('aria-expanded', String(!collapsed));
+  }
+  localStorage.setItem('jplrc-bili-collapsed', collapsed ? '1' : '0');
+}
+
+$('#btn-toggle-bili-player')?.addEventListener('click', () => {
+  setBiliPlayerCollapsed(!biliWrap.classList.contains('bili-collapsed'));
+});
+
 // Spacebar to toggle in timer mode
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Space' && player.mode === 'timer' &&
@@ -770,13 +1142,6 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     player.timerToggle();
   }
-});
-
-$('#btn-load-yt')?.addEventListener('click', async () => {
-  const id = parseYouTubeId($('#yt-url').value);
-  if (!id) { setStatus('无法识别 YouTube 链接或 ID', true); return; }
-  setStatus(`载入 YouTube：${id}`);
-  await switchToYouTubeMode(id);
 });
 
 /* ---------------- Bilibili ---------------- */
@@ -796,70 +1161,149 @@ $('#btn-load-bili').addEventListener('click', () => {
   switchToBilibiliMode(bvid);
 });
 
-/* ---------------- UtaTen (assist with high-quality furigana) ---------------- */
-// Use r.jina.ai reader as a CORS-friendly proxy that returns the original HTML.
-async function utatenFetchHtml(url) {
-  const r = await fetch('https://r.jina.ai/' + url, {
-    headers: { 'X-Return-Format': 'html' }
-  });
-  if (!r.ok) throw new Error('网络错误 ' + r.status);
-  return await r.text();
+$('#btn-close-bili-search')?.addEventListener('click', () => setBiliSearchPopoverOpen(false));
+$('#btn-skip-bili-search')?.addEventListener('click', () => setBiliSearchPopoverOpen(false));
+
+/* ---------------- UtaTen (official-site fallback) ---------------- */
+function utatenBuildSearchUrl(query, artist = '') {
+  const u = new URL('https://utaten.com/search');
+  if (query) u.searchParams.set('title', query);
+  if (artist) u.searchParams.set('artist_name', artist);
+  return u.toString();
 }
 
-function utatenParseSearch(html) {
-  // Search results page contains links like <a href="/lyric/xxxxxxxxxx/">title</a>
-  // followed by an artist link. Use a DOMParser to extract the table rows.
-  const doc = new DOMParser().parseFromString(html, 'text/html');
+function utatenBuildLyricUrl(id) {
+  return `https://utaten.com/lyric/${encodeURIComponent(id)}/`;
+}
+
+function openExternalUrl(url) {
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+function openUtatenSearchForItem(item) {
+  const title = item?.trackName || '';
+  const artist = item?.artistName || '';
+  const url = utatenBuildSearchUrl(title, artist);
+  openExternalUrl(url);
+  setStatus('已打开 UtaTen 原站搜索页。当前浏览器环境下跨域抓取不稳定，改为直达原站查看注音。');
+}
+
+const RE_KANJI = /[\u3400-\u9fff々ヶ]/;
+
+function utatenParseSearch(text) {
+  // Real HTML path (in case the proxy ever returns HTML again).
+  if (/<a\s+href=/i.test(text)) {
+    try {
+      const doc = new DOMParser().parseFromString(text, 'text/html');
+      const out = [];
+      const seen = new Set();
+      doc.querySelectorAll('a[href*="/lyric/"]').forEach(a => {
+        const m = a.getAttribute('href').match(/\/lyric\/([\w-]+)\//);
+        if (!m) return;
+        const id = m[1];
+        if (seen.has(id)) return;
+        const title = (a.textContent || '').trim();
+        if (!title || title.length > 80) return;
+        const row = a.closest('tr');
+        let artist = '';
+        if (row) {
+          const aArtist = row.querySelector('a[href*="/artist/"]');
+          if (aArtist) artist = aArtist.textContent.trim();
+        }
+        seen.add(id);
+        out.push({ id, title, artist });
+      });
+      if (out.length) return out.slice(0, 30);
+    } catch {}
+  }
+  // Markdown fallback. Only count entries whose lyric link is followed by an
+  // artist link nearby — this filters out sidebar "おすすめ" rows.
   const out = [];
   const seen = new Set();
-  doc.querySelectorAll('a[href*="/lyric/"]').forEach(a => {
-    const m = a.getAttribute('href').match(/\/lyric\/([\w-]+)\//);
-    if (!m) return;
-    const id = m[1];
-    if (seen.has(id)) return;
+  const re = /\[([^\]\n]{1,80})\]\(https:\/\/utaten\.com\/lyric\/([\w-]+)\/\)\s*(?:\||\s)*\s*\[([^\]\n]{1,80})\]\(https:\/\/utaten\.com\/artist\/[\w%-]+\/?\)/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const [, title, id, artist] = m;
+    if (seen.has(id)) continue;
     seen.add(id);
-    const title = a.textContent.trim();
-    if (!title || title.length > 80) return;
-    // Try to find artist sibling
-    let artist = '';
-    const row = a.closest('tr');
-    if (row) {
-      const aArtist = row.querySelector('a[href*="/artist/"]');
-      if (aArtist) artist = aArtist.textContent.trim();
-    }
-    out.push({ id, title, artist });
-  });
-  return out.slice(0, 30);
+    out.push({ id, title: title.trim(), artist: artist.trim() });
+    if (out.length >= 30) break;
+  }
+  return out;
 }
 
-function utatenParseLyric(html) {
-  // The lyric body lives inside <div class="hiragana"> with <span class="ruby"><span class="rb">汉</span><span class="rt">かん</span></span>
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const body = doc.querySelector('.hiragana') || doc.querySelector('.romaji') || doc.querySelector('.lyricBody .medium');
-  if (!body) return { lines: [], pairs: {} };
+function utatenParseLyric(text) {
+  // 1) HTML path (legacy).
+  if (/<span\s+class=["']ruby["']/i.test(text)) {
+    try {
+      const doc = new DOMParser().parseFromString(text, 'text/html');
+      const body = doc.querySelector('.hiragana') || doc.querySelector('.romaji') || doc.querySelector('.lyricBody .medium');
+      if (body) {
+        const pairs = {};
+        body.querySelectorAll('span.ruby').forEach(sp => {
+          const rb = sp.querySelector('.rb')?.textContent.trim();
+          const rt = sp.querySelector('.rt')?.textContent.trim();
+          if (rb && rt && RE_KANJI.test(rb) && !pairs[rb]) pairs[rb] = rt;
+        });
+        const clone = body.cloneNode(true);
+        clone.querySelectorAll('span.ruby').forEach(sp => {
+          const rb = sp.querySelector('.rb')?.textContent || '';
+          sp.replaceWith(document.createTextNode(rb));
+        });
+        clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+        const lines = clone.textContent.replace(/\u00a0/g, ' ')
+          .split(/\n+/).map(s => s.trim()).filter(Boolean);
+        if (Object.keys(pairs).length) return { lines, pairs };
+      }
+    } catch {}
+  }
 
-  // Extract kanji->kana pairs
+  // 2) Markdown fallback. UtaTen renders furigana inline as `汉字 假名`.
+  // Slice out only the furigana section to avoid the romaji repeat (which uses
+  // latin letters as the reading marker, e.g. `沈 shizu むように`) and unrelated
+  // navigation/footer text.
+  let body = text;
+  const startMatches = [
+    /文字サイズ\s+ふりがな\s+ダークモード/,
+    /ふりがな\s+ダークモード/,
+    /## .*?歌詞\s*\n/,
+  ];
+  for (const re of startMatches) {
+    const m = body.match(re);
+    if (m) { body = body.slice(m.index + m[0].length); break; }
+  }
+  const endMatches = [
+    /\[この歌詞へのご意見\]/,
+    /\[みんなのレビュー/,
+    /## .*?の人気歌詞ランキング/,
+    /の特集を全て見る/,
+  ];
+  for (const re of endMatches) {
+    const m = body.match(re);
+    if (m) { body = body.slice(0, m.index); break; }
+  }
+
+  // Extract `汉字+ 空白 假名+` pairs.
   const pairs = {};
-  body.querySelectorAll('span.ruby').forEach(sp => {
-    const rb = sp.querySelector('.rb')?.textContent.trim();
-    const rt = sp.querySelector('.rt')?.textContent.trim();
-    if (rb && rt && /[\u4e00-\u9faf]/.test(rb)) {
-      // Keep first occurrence (most common reading), but allow override with longer keys later
-      if (!pairs[rb]) pairs[rb] = rt;
-    }
-  });
+  const pairRe = /([\u3400-\u9fff々ヶ]+)[ \t\u3000]+([\u3041-\u3096ー]+)/g;
+  let m;
+  while ((m = pairRe.exec(body)) !== null) {
+    const kanji = m[1], kana = m[2];
+    if (kana.length > 10) continue; // sanity
+    if (!pairs[kanji]) pairs[kanji] = kana;
+  }
 
-  // Build line texts: replace ruby spans with just the kanji surface, then split by <br>.
-  // Clone to avoid mutating doc.
-  const clone = body.cloneNode(true);
-  clone.querySelectorAll('span.ruby').forEach(sp => {
-    const rb = sp.querySelector('.rb')?.textContent || '';
-    sp.replaceWith(document.createTextNode(rb));
-  });
-  // Convert <br> into \n
-  clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
-  const text = clone.textContent.replace(/\u00a0/g, ' ');
-  const lines = text.split(/\n+/).map(s => s.trim()).filter(Boolean);
+  // Best-effort lyric line extraction: drop the kana annotations to recover
+  // kanji-only text, then split on line breaks.
+  const stripped = body
+    .replace(pairRe, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/[ \t]+/g, ' ');
+  const lines = stripped.split(/\n+/)
+    .map(s => s.trim())
+    .filter(s => s && s.length < 80
+      && /[\u3041-\u309f\u30a0-\u30ff\u3400-\u9fff]/.test(s));
 
   return { lines, pairs };
 }
@@ -879,71 +1323,14 @@ function mergeOverridesFromPairs(pairs) {
 async function utatenSearch() {
   const q = $('#utaten-q').value.trim();
   if (!q) return;
-  const list = $('#utaten-results');
-  list.hidden = false;
-  list.innerHTML = '<div style="padding:12px;color:var(--muted)">搜索中...</div>';
-  setStatus('UtaTen 搜索中...');
-  try {
-    const url = `https://utaten.com/search?title=${encodeURIComponent(q)}`;
-    const html = await utatenFetchHtml(url);
-    const items = utatenParseSearch(html);
-    if (!items.length) {
-      list.innerHTML = '<div style="padding:12px;color:var(--muted)">未找到结果。</div>';
-      setStatus('');
-      return;
-    }
-    list.innerHTML = '';
-    items.forEach(it => {
-      const div = document.createElement('div');
-      div.className = 'result-item';
-      div.innerHTML = `
-        <div class="title">${escapeHTML(it.title)} <span class="badge">UtaTen</span></div>
-        <div class="meta">${escapeHTML(it.artist || '')} · ID ${escapeHTML(it.id)}</div>
-      `;
-      div.addEventListener('click', () => loadFromUtaten(it));
-      list.appendChild(div);
-    });
-    setStatus(`UtaTen 找到 ${items.length} 条，点击载入读音`);
-  } catch (e) {
-    list.innerHTML = `<div style="padding:12px;color:var(--danger)">UtaTen 搜索失败：${escapeHTML(e.message)}</div>`;
-    setStatus('UtaTen 搜索失败', true);
-  }
+  openExternalUrl(utatenBuildSearchUrl(q));
+  setStatus('已打开 UtaTen 原站搜索页。');
 }
 
 async function loadFromUtaten(item) {
-  setStatus(`UtaTen 载入：${item.title}...`);
-  try {
-    const html = await utatenFetchHtml(`https://utaten.com/lyric/${item.id}/`);
-    const { lines, pairs } = utatenParseLyric(html);
-    if (!Object.keys(pairs).length) {
-      setStatus('UtaTen 页面未能解析出注音', true);
-      return;
-    }
-    const added = mergeOverridesFromPairs(pairs);
-    $('#utaten-results').hidden = true;
-
-    // If we already have synced lyrics loaded, re-render with new overrides
-    const lrcText = $('#lrc-text').value;
-    if (lrcText.trim() && lrcLines.length) {
-      setStatus(`UtaTen ✓ 学到 ${added} 个新读音，正在用新假名重新渲染同步歌词...`);
-      await loadLrcFromText(lrcText);
-    } else if (lines.length) {
-      // No synced LRC: render utaten lyrics as plain (no timing) and switch to timer mode
-      setStatus(`UtaTen ✓ 学到 ${added} 个新读音，已显示纯文本歌词（无时间轴，请使用计时模式）。`);
-      const fakeLrc = lines.map((line, i) => `[${String(Math.floor(i*4/60)).padStart(2,'0')}:${String((i*4)%60).padStart(2,'0')}.00]${line}`).join('\n');
-      $('#lrc-text').value = fakeLrc;
-      await loadLrcFromText(fakeLrc);
-      switchToTimerMode();
-    } else {
-      setStatus(`UtaTen ✓ 学到 ${added} 个新读音。`);
-    }
-  } catch (e) {
-    setStatus('UtaTen 载入失败：' + e.message, true);
-  }
+  openExternalUrl(utatenBuildLyricUrl(item.id));
+  setStatus(`已打开 UtaTen 歌词页：${item.title}。原站页面自带注音，可直接查看。`);
 }
-
-$('#btn-utaten-search').addEventListener('click', utatenSearch);
-$('#utaten-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') utatenSearch(); });
 
 /* ---------------- Init: warm up kuroshiro on first interaction ---------------- */
 let warmed = false;

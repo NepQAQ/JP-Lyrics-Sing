@@ -26,12 +26,44 @@
       <button id="btn-mode" class="mode-btn" aria-label="切换跳唱/阅读模式" title="切换跳唱/阅读模式">
         <span class="mode-icon">🎤</span><span class="mode-text">跟唱</span>
       </button>
+      <button id="btn-overrides-panel" class="icon-btn" aria-label="读音修正" title="读音修正">読</button>
       <button id="btn-theme" class="icon-btn" aria-label="切换主题" title="切换日间/夜间模式">
         <span class="theme-icon">🌙</span>
       </button>
       <button id="btn-toggle-panel" class="icon-btn" aria-label="切换控制面板" title="控制面板">⚙️</button>
     </div>
   </header>
+
+  <aside id="overrides-popover" class="overrides-popover glass" hidden>
+    <div class="popover-head">
+      <div>
+        <div class="popover-title">读音修正</div>
+        <div class="popover-subtitle">自定义词典</div>
+      </div>
+      <button id="btn-close-overrides" class="icon-btn popover-close" aria-label="关闭读音修正" title="关闭">×</button>
+    </div>
+    <p class="hint-sm">每行一条 <code>汉字=假名</code>，可选 <code>汉字=假名|romaji</code>。例：<code>二人=ふたり|futari</code>。</p>
+    <textarea id="overrides-text" rows="7" placeholder="二人=ふたり|futari&#10;明日=あした&#10;# 以 # 开头的行会被忽略"></textarea>
+    <div class="row">
+      <button id="btn-save-overrides" class="primary">保存并应用</button>
+      <button id="btn-reload-lyrics">重新生成假名</button>
+    </div>
+  </aside>
+
+  <aside id="bili-search-popover" class="bili-search-popover glass" hidden>
+    <div class="popover-head">
+      <div>
+        <div class="popover-title">选择 Bilibili 音源</div>
+        <div id="bili-search-subtitle" class="popover-subtitle">先选歌词，再选视频</div>
+      </div>
+      <button id="btn-close-bili-search" class="icon-btn popover-close" aria-label="关闭 B站搜索" title="关闭">×</button>
+    </div>
+    <p class="hint-sm">已载入歌词。下面是为这首歌检索到的 B 站候选视频，点一下就会自动填入 BV 并载入播放器。</p>
+    <div id="bili-search-results" class="search-results bili-search-results"></div>
+    <div class="row">
+      <button id="btn-skip-bili-search">暂不选择</button>
+    </div>
+  </aside>
 
   <section id="panel" class="panel glass">
     <div class="row search-row">
@@ -45,18 +77,19 @@
 
     <div class="section-label">音频来源</div>
     <div class="source-tabs" role="tablist">
-      <button class="tab active" data-tab="local" role="tab">📁 本地</button>
+      <button class="tab active" data-tab="timer" role="tab">⏱ 计时</button>
       <button class="tab" data-tab="bilibili" role="tab">📺 Bilibili</button>
-      <button class="tab" data-tab="timer" role="tab">⏱ 计时</button>
-      <button class="tab" data-tab="lrc" role="tab">📝 LRC</button>
+      <button class="tab" data-tab="local" role="tab">📁 本地</button>
     </div>
 
-    <div class="tab-pane active" data-pane="local">
-      <label class="file-label block">
-        <span class="file-cta">选择音频文件</span>
-        <span id="audio-file-name" class="file-name">未选择文件（mp3 / m4a / flac / wav…）</span>
-        <input id="audio-file" type="file" accept="audio/*" hidden />
-      </label>
+    <div class="tab-pane active" data-pane="timer">
+      <p class="hint-sm" style="margin-bottom:8px">用于无法读取播放进度的场景（如 B 站、外部播放器、唱 K）。在歌曲第 0 秒按 ▶ 开始即可。</p>
+      <div class="row">
+        <button id="btn-timer-start" class="primary">▶ 开始 / 暂停</button>
+        <button id="btn-timer-reset">⟲ 归零</button>
+        <button id="btn-timer-back">« -0.5s</button>
+        <button id="btn-timer-fwd">+0.5s »</button>
+      </div>
     </div>
 
     <div class="tab-pane" data-pane="bilibili">
@@ -67,26 +100,31 @@
       <p class="hint-sm">B 站官方播放器不开放进度 API，将自动启用「计时模式」：在 B 站点播放的同时点 ▶ 开始即可，可用 ± 微调。</p>
     </div>
 
-    <div class="tab-pane" data-pane="timer">
-      <p class="hint-sm" style="margin-bottom:8px">用于无法读取播放进度的场景（如 B 站、外部播放器、唱 K）。在歌曲第 0 秒按 ▶ 开始即可。</p>
-      <div class="row">
-        <button id="btn-timer-start" class="primary">▶ 开始 / 暂停</button>
-        <button id="btn-timer-reset">⟲ 归零</button>
-        <button id="btn-timer-back">« -0.5s</button>
-        <button id="btn-timer-fwd">+0.5s »</button>
+    <div class="tab-pane" data-pane="local">
+      <div class="sub-tabs" role="tablist">
+        <button class="sub-tab active" data-subtab="audio" role="tab">🎵 音频</button>
+        <button class="sub-tab" data-subtab="lrc" role="tab">📝 LRC 歌词</button>
       </div>
-    </div>
 
-    <div class="tab-pane" data-pane="lrc">
-      <label class="file-label block">
-        <span class="file-cta">上传 LRC 文件</span>
-        <span id="lrc-file-name" class="file-name">未选择 .lrc 文件</span>
-        <input id="lrc-file" type="file" accept=".lrc,.txt" hidden />
-      </label>
-      <textarea id="lrc-text" rows="5" placeholder="或在此粘贴 LRC 歌词文本（含 [mm:ss.xx] 时间标签）"></textarea>
-      <div class="row">
-        <button id="btn-load-lrc" class="primary">加载歌词</button>
-        <button id="btn-clear">清空</button>
+      <div class="sub-pane active" data-subpane="audio">
+        <label class="file-label block">
+          <span class="file-cta">选择音频文件</span>
+          <span id="audio-file-name" class="file-name">未选择文件（mp3 / m4a / flac / wav…）</span>
+          <input id="audio-file" type="file" accept="audio/*" hidden />
+        </label>
+      </div>
+
+      <div class="sub-pane" data-subpane="lrc">
+        <label class="file-label block">
+          <span class="file-cta">上传 LRC 文件</span>
+          <span id="lrc-file-name" class="file-name">未选择 .lrc 文件</span>
+          <input id="lrc-file" type="file" accept=".lrc,.txt" hidden />
+        </label>
+        <textarea id="lrc-text" rows="5" placeholder="或在此粘贴 LRC 歌词文本（含 [mm:ss.xx] 时间标签）"></textarea>
+        <div class="row">
+          <button id="btn-load-lrc" class="primary">加载歌词</button>
+          <button id="btn-clear">清空</button>
+        </div>
       </div>
     </div>
 
@@ -94,19 +132,9 @@
     <div class="row toggles">
       <label class="chip"><input type="checkbox" id="show-furigana" checked /><span>假名</span></label>
       <label class="chip"><input type="checkbox" id="show-romaji" checked /><span>罗马音</span></label>
-      <label class="chip"><input type="checkbox" id="show-zh" checked /><span>中文</span></label>
+      <label class="chip"><input type="checkbox" id="show-zh" /><span>中文</span></label>
       <label class="chip"><input type="checkbox" id="auto-translate" /><span>自动翻译</span></label>
     </div>
-
-    <details class="overrides-block">
-      <summary>📖 读音修正（自定义词典）</summary>
-      <p class="hint-sm">每行一条 <code>汉字=假名</code>，可选指定罗马音 <code>汉字=假名|romaji</code>。例：<code>二人=ふたり|futari</code>。已内置常见词（二人、一人、今日 等）。</p>
-      <textarea id="overrides-text" rows="5" placeholder="二人=ふたり|futari&#10;明日=あした&#10;# 以 # 开头的行会被忽略"></textarea>
-      <div class="row">
-        <button id="btn-save-overrides" class="primary">保存并应用</button>
-        <button id="btn-reload-lyrics">重新生成假名</button>
-      </div>
-    </details>
 
     <div id="status" class="status"></div>
   </section>
@@ -129,8 +157,14 @@
   </div>
 
   <footer class="player-bar glass" id="player-bar">
-    <div id="bili-wrap" class="yt-wrap" hidden>
-      <iframe id="bili-iframe" src="" allowfullscreen allow="autoplay; fullscreen" scrolling="no" frameborder="0"></iframe>
+    <div id="bili-wrap" class="yt-wrap bili-wrap" hidden>
+      <div class="bili-player-head">
+        <span>Bilibili 音源</span>
+        <button id="btn-toggle-bili-player" class="btn-mini" type="button" aria-expanded="true">收起</button>
+      </div>
+      <div class="bili-frame-box">
+        <iframe id="bili-iframe" src="" allowfullscreen allow="autoplay; fullscreen" scrolling="no" frameborder="0"></iframe>
+      </div>
     </div>
     <audio id="audio" preload="metadata" controls playsinline></audio>
   </footer>

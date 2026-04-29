@@ -92,27 +92,80 @@ $$('.source-tabs .tab').forEach(btn => {
 });
 
 /* ---------------- Kuroshiro ---------------- */
+// Multiple CDN candidates; we try them in order. unpkg sometimes fails on HTTPS
+// because dict .gz files get served with the wrong MIME and the request hangs
+// without rejecting, which would freeze the whole UI. jsDelivr is more reliable.
+const DICT_CDNS = [
+  'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/',
+  'https://fastly.jsdelivr.net/npm/kuromoji@0.1.2/dict/',
+  'https://unpkg.com/kuromoji@0.1.2/dict/',
+];
+const DICT_TIMEOUT_MS = 25000;
+let kuroshiroFailed = false;
+
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} 超时 (${ms / 1000}s)`)), ms);
+    promise.then(v => { clearTimeout(t); resolve(v); },
+                 e => { clearTimeout(t); reject(e); });
+  });
+}
+
+async function tryInitKuroshiro(dictPath) {
+  const k = new Kuroshiro.default();
+  const analyzer = new KuromojiAnalyzer({ dictPath });
+  await withTimeout(k.init(analyzer), DICT_TIMEOUT_MS, '词典加载');
+  return k;
+}
+
 async function ensureKuroshiro() {
+  if (kuroshiro) return kuroshiro;
+  if (kuroshiroFailed) throw new Error('分词器之前加载失败，请重试');
   if (kuroshiroReady) return kuroshiroReady;
-  setStatus('正在加载日语分词器（首次约 2-5MB，请稍候）...');
+
   kuroshiroReady = (async () => {
-    const k = new Kuroshiro.default();
-    const analyzer = new KuromojiAnalyzer({
-      dictPath: 'https://unpkg.com/kuromoji@0.1.2/dict/'
-    });
-    await k.init(analyzer);
-    kuroshiro = k;
-    setStatus('分词器已就绪 ✓');
-    return k;
+    let lastErr;
+    for (let i = 0; i < DICT_CDNS.length; i++) {
+      const cdn = DICT_CDNS[i];
+      setStatus(`正在加载日语分词器 (${i + 1}/${DICT_CDNS.length}) ...`);
+      try {
+        const k = await tryInitKuroshiro(cdn);
+        kuroshiro = k;
+        setStatus('分词器已就绪 ✓');
+        return k;
+      } catch (e) {
+        lastErr = e;
+        console.warn('[kuroshiro] CDN failed:', cdn, e);
+      }
+    }
+    kuroshiroFailed = true;
+    kuroshiroReady = null; // allow retry on next call
+    throw lastErr || new Error('所有 CDN 均失败');
   })();
+
   return kuroshiroReady;
 }
 
 async function toFurigana(text) {
   if (!text || !text.trim()) return { html: '', romaji: '' };
-  const k = await ensureKuroshiro();
-  // Split text by reading-overrides; render override segments by hand, kuroshiro for the rest.
+  // Always honor the manual overrides first (works even without kuroshiro).
   const segments = splitByOverrides(text);
+  let k;
+  try {
+    k = await ensureKuroshiro();
+  } catch (e) {
+    // Fall back: render plain text + override pieces only, never block the UI.
+    let html = '', romajiParts = [];
+    for (const seg of segments) {
+      if (seg.type === 'override') {
+        html += `<ruby>${escapeHTML(seg.kanji)}<rt>${escapeHTML(seg.kana)}</rt></ruby>`;
+        romajiParts.push(seg.romaji);
+      } else {
+        html += escapeHTML(seg.text);
+      }
+    }
+    return { html, romaji: romajiParts.join(' ').trim() };
+  }
   let html = '', romajiParts = [];
   for (const seg of segments) {
     if (seg.type === 'override') {
@@ -897,7 +950,12 @@ let warmed = false;
 const warm = () => {
   if (warmed) return;
   warmed = true;
-  ensureKuroshiro().catch(err => setStatus('分词器加载失败: ' + err.message, true));
+  ensureKuroshiro().catch(err => {
+    setStatus('分词器加载失败：' + err.message + ' · 点击页面任意位置重试', true);
+    // allow retry on next user interaction
+    warmed = false;
+    kuroshiroFailed = false;
+  });
 };
-document.addEventListener('click', warm, { once: true });
-document.addEventListener('touchstart', warm, { once: true, passive: true });
+document.addEventListener('click', warm, { once: false });
+document.addEventListener('touchstart', warm, { once: false, passive: true });

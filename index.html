@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0d24" />
+  <title>日语跟唱 · JP Lyrics Sing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&family=Noto+Sans+SC:wght@400;500&family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg-aurora" aria-hidden="true">
+    <span class="blob b1"></span>
+    <span class="blob b2"></span>
+    <span class="blob b3"></span>
+  </div>
+
+  <header class="app-header glass">
+    <div class="brand">
+      <span class="logo">🎤</span>
+      <h1>日语跟唱<span class="brand-sub">JP Lyrics Sing</span></h1>
+    </div>
+    <div class="header-actions">
+      <button id="btn-theme" class="icon-btn" aria-label="切换主题" title="切换日间/夜间模式">
+        <span class="theme-icon">🌙</span>
+      </button>
+      <button id="btn-toggle-panel" class="icon-btn" aria-label="切换控制面板" title="控制面板">⚙️</button>
+    </div>
+  </header>
+
+  <section id="panel" class="panel glass">
+    <div class="row search-row">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input id="search-input" type="search" placeholder="搜索歌曲（如：夜に駆ける YOASOBI）" />
+      </div>
+      <button id="btn-search" class="primary">搜索歌词</button>
+    </div>
+    <div id="search-results" class="search-results" hidden></div>
+
+    <div class="source-tabs" role="tablist">
+      <button class="tab active" data-tab="local" role="tab">📁 本地</button>
+      <button class="tab" data-tab="youtube" role="tab">▶️ YouTube</button>
+      <button class="tab" data-tab="bilibili" role="tab">📺 Bilibili</button>
+      <button class="tab" data-tab="timer" role="tab">⏱ 计时</button>
+      <button class="tab" data-tab="lrc" role="tab">📝 LRC</button>
+    </div>
+
+    <div class="tab-pane active" data-pane="local">
+      <label class="file-label block">
+        <span class="file-cta">选择音频文件</span>
+        <span id="audio-file-name" class="file-name">未选择文件（mp3 / m4a / flac / wav…）</span>
+        <input id="audio-file" type="file" accept="audio/*" hidden />
+      </label>
+    </div>
+
+    <div class="tab-pane" data-pane="youtube">
+      <div class="row">
+        <input id="yt-url" type="text" placeholder="粘贴 YouTube 链接或 ID（例：https://youtu.be/x8VYWazR5mE）" />
+        <button id="btn-load-yt" class="primary">载入</button>
+      </div>
+      <p class="hint-sm">自动同步进度。若提示「错误 153」表示该视频禁止外站嵌入，请换一首或改用 Bilibili / 计时模式。</p>
+    </div>
+
+    <div class="tab-pane" data-pane="bilibili">
+      <div class="row">
+        <input id="bili-url" type="text" placeholder="粘贴 B 站链接（BV/av 都行，例：https://www.bilibili.com/video/BV1GJ411x7h7）" />
+        <button id="btn-load-bili" class="primary">载入</button>
+      </div>
+      <p class="hint-sm">B 站官方播放器不开放进度 API，将自动启用「计时模式」：在 B 站点播放的同时点 ▶ 开始即可，可用 ± 微调。</p>
+    </div>
+
+    <div class="tab-pane" data-pane="timer">
+      <p class="hint-sm" style="margin-bottom:8px">用于无法读取播放进度的场景（如 B 站、外部播放器、唱 K）。在歌曲第 0 秒按 ▶ 开始即可。</p>
+      <div class="row">
+        <button id="btn-timer-start" class="primary">▶ 开始 / 暂停</button>
+        <button id="btn-timer-reset">⟲ 归零</button>
+        <button id="btn-timer-back">« -0.5s</button>
+        <button id="btn-timer-fwd">+0.5s »</button>
+      </div>
+    </div>
+
+    <div class="tab-pane" data-pane="lrc">
+      <label class="file-label block">
+        <span class="file-cta">上传 LRC 文件</span>
+        <span id="lrc-file-name" class="file-name">未选择 .lrc 文件</span>
+        <input id="lrc-file" type="file" accept=".lrc,.txt" hidden />
+      </label>
+      <textarea id="lrc-text" rows="5" placeholder="或在此粘贴 LRC 歌词文本（含 [mm:ss.xx] 时间标签）"></textarea>
+      <div class="row">
+        <button id="btn-load-lrc" class="primary">加载歌词</button>
+        <button id="btn-clear">清空</button>
+      </div>
+    </div>
+
+    <div class="row toggles">
+      <label class="chip"><input type="checkbox" id="show-furigana" checked /><span>假名</span></label>
+      <label class="chip"><input type="checkbox" id="show-romaji" checked /><span>罗马音</span></label>
+      <label class="chip"><input type="checkbox" id="show-zh" checked /><span>中文</span></label>
+      <label class="chip"><input type="checkbox" id="auto-translate" /><span>自动翻译</span></label>
+    </div>
+
+    <details class="overrides-block">
+      <summary>📖 读音修正（自定义词典）</summary>
+      <p class="hint-sm">每行一条 <code>汉字=假名</code>，可选指定罗马音 <code>汉字=假名|romaji</code>。例：<code>二人=ふたり|futari</code>。已内置常见词（二人、一人、今日 等）。</p>
+      <textarea id="overrides-text" rows="5" placeholder="二人=ふたり|futari&#10;明日=あした&#10;# 以 # 开头的行会被忽略"></textarea>
+      <div class="row">
+        <button id="btn-save-overrides" class="primary">保存并应用</button>
+        <button id="btn-reload-lyrics">重新生成假名</button>
+      </div>
+    </details>
+
+    <div id="status" class="status"></div>
+  </section>
+
+  <main id="lyrics-view" class="lyrics-view" tabindex="0">
+    <div class="hint-card">
+      <div class="hint-emoji">🎵</div>
+      <p><strong>欢迎！</strong></p>
+      <p>在上方搜索歌词，再选择音频来源（本地文件或 YouTube）即可开始跟唱。</p>
+      <p class="hint-sub">假名 / 罗马音由浏览器本地生成，歌词来源于 lrclib.net。</p>
+    </div>
+  </main>
+
+  <div id="timer-hud" class="timer-hud" hidden>
+    <span class="hud-dot"></span>
+    <span id="timer-display">00:00.0</span>
+    <button id="hud-toggle" class="hud-btn" title="开始/暂停">▶</button>
+    <button id="hud-back" class="hud-btn" title="-0.5s">«</button>
+    <button id="hud-fwd" class="hud-btn" title="+0.5s">»</button>
+  </div>
+
+  <footer class="player-bar glass" id="player-bar">
+    <div id="yt-wrap" class="yt-wrap" hidden>
+      <div id="yt-player"></div>
+    </div>
+    <div id="bili-wrap" class="yt-wrap" hidden>
+      <iframe id="bili-iframe" src="" allowfullscreen allow="autoplay; fullscreen" scrolling="no" frameborder="0"></iframe>
+    </div>
+    <audio id="audio" preload="metadata" controls playsinline></audio>
+  </footer>
+
+  <!-- Libraries (CDN) -->
+  <script src="https://unpkg.com/kuromoji@0.1.2/build/kuromoji.js"></script>
+  <script src="https://unpkg.com/kuroshiro@1.2.0/dist/kuroshiro.min.js"></script>
+  <script src="https://unpkg.com/kuroshiro-analyzer-kuromoji@1.1.0/dist/kuroshiro-analyzer-kuromoji.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

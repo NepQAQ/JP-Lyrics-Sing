@@ -118,14 +118,11 @@ $$('.sub-tabs').forEach(group => {
 });
 
 /* ---------------- Kuroshiro ---------------- */
-// Multiple CDN candidates; we try them in order. unpkg sometimes fails on HTTPS
-// because dict .gz files get served with the wrong MIME and the request hangs
-// without rejecting, which would freeze the whole UI. jsDelivr is more reliable.
-const DICT_CDNS = [
-  'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/',
-  'https://fastly.jsdelivr.net/npm/kuromoji@0.1.2/dict/',
-  'https://unpkg.com/kuromoji@0.1.2/dict/',
-];
+// The browser build of kuromoji does not reliably handle absolute remote dict URLs.
+// On GitHub Pages it can degrade "https://cdn..." into a same-origin path such as
+// "/cdn.jsdelivr.net/...", which leaves the UI stuck at "加载分词器" while requests 404.
+// Serving the dictionary from this site avoids that broken URL normalization entirely.
+const DICT_CDNS = ['dict/'];
 const DICT_TIMEOUT_MS = 25000;
 let kuroshiroFailed = false;
 

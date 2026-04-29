@@ -48,7 +48,6 @@
       <button class="tab active" data-tab="local" role="tab">📁 本地</button>
       <button class="tab" data-tab="bilibili" role="tab">📺 Bilibili</button>
       <button class="tab" data-tab="timer" role="tab">⏱ 计时</button>
-      <button class="tab" data-tab="utaten" role="tab">🎌 UtaTen</button>
       <button class="tab" data-tab="lrc" role="tab">📝 LRC</button>
     </div>
 
@@ -76,17 +75,6 @@
         <button id="btn-timer-back">« -0.5s</button>
         <button id="btn-timer-fwd">+0.5s »</button>
       </div>
-    </div>
-
-    <div class="tab-pane" data-pane="utaten">
-      <p class="hint-sm" style="margin-bottom:8px">
-        从 <a href="https://utaten.com" target="_blank" rel="noopener" style="color:var(--accent)">utaten.com</a> 获取高质量的汉字注音。点击结果会自动学习该歌的读音并应用到当前歌词（如未加载同步 LRC，则直接显示 UtaTen 纯文本歌词）。
-      </p>
-      <div class="row">
-        <input id="utaten-q" type="text" placeholder="歌名（如：夜に駆ける）" />
-        <button id="btn-utaten-search" class="primary">搜索</button>
-      </div>
-      <div id="utaten-results" class="search-results" hidden></div>
     </div>
 
     <div class="tab-pane" data-pane="lrc">

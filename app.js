@@ -11,6 +11,8 @@ const searchResults = $('#search-results');
 const biliWrap = $('#bili-wrap');
 let searchRequestId = 0;
 let biliSearchRequestId = 0;
+let latestBiliCandidates = [];
+let latestBiliQuery = '';
 
 let kuroshiro = null;
 let kuroshiroReady = null;
@@ -62,8 +64,22 @@ function setPlayerVisible(visible) {
 setPlayerVisible(false); // default: no source
 
 /* ---------------- UI helpers ---------------- */
-function setStatus(msg, isError = false) {
-  statusEl.textContent = msg || '';
+function setStatus(msg, isError = false, action = null) {
+  statusEl.replaceChildren();
+  const text = document.createElement('span');
+  text.className = 'status-text';
+  text.textContent = msg || '';
+  statusEl.appendChild(text);
+
+  if (action?.label && typeof action.onClick === 'function') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'status-action';
+    btn.textContent = action.label;
+    btn.addEventListener('click', action.onClick);
+    statusEl.appendChild(btn);
+  }
+
   statusEl.classList.toggle('error', !!isError);
 }
 
@@ -777,6 +793,17 @@ function setBiliSearchPopoverOpen(open) {
   popover.hidden = !open;
 }
 
+function openLatestBiliCandidates() {
+  if (!latestBiliCandidates.length) {
+    setStatus('当前还没有可展示的 B 站候选视频', true);
+    return;
+  }
+  const subtitle = $('#bili-search-subtitle');
+  if (subtitle) subtitle.textContent = latestBiliQuery || '为当前歌词选择 B 站音源';
+  renderBiliSearchResults(latestBiliCandidates, latestBiliQuery || '当前歌词');
+  setBiliSearchPopoverOpen(true);
+}
+
 function renderBiliSearchResults(items, query) {
   const list = $('#bili-search-results');
   if (!list) return;
@@ -823,9 +850,16 @@ async function openBilibiliSearchPopoverForLyric(item) {
   const items = await searchBilibiliVideos(query);
   if (requestId !== biliSearchRequestId) return;
   if (Array.isArray(items) && items.length) {
+    latestBiliCandidates = items.slice(0, 12);
+    latestBiliQuery = query;
     renderBiliSearchResults(items, query);
-    setStatus(`歌词已载入 · 找到 ${items.length} 条 B 站候选视频`);
+    setStatus(`歌词已载入 · 找到 ${items.length} 条 B 站候选视频`, false, {
+      label: '查看候选',
+      onClick: openLatestBiliCandidates,
+    });
   } else {
+    latestBiliCandidates = [];
+    latestBiliQuery = query;
     list.innerHTML = `<div style="padding:12px;color:var(--muted)">Bilibili 搜索暂不可用${items?.__error ? `：${escapeHTML(items.__error)}` : ''}</div>`;
     setStatus('歌词已载入；Bilibili 搜索暂不可用', true);
   }
@@ -1331,11 +1365,23 @@ async function loadFromUtaten(item) {
 
 /* ---------------- Init: warm up kuroshiro on first interaction ---------------- */
 let warmed = false;
+
+function formatKuroshiroInitError(err) {
+  const raw = typeof err === 'string'
+    ? err
+    : err?.message || err?.reason || err?.toString?.() || '未知错误';
+
+  if (location.protocol === 'file:') {
+    return '当前是直接打开 HTML（file://）。部分浏览器会拦截本地词典请求，请改用本地服务器或 GitHub Pages 打开。';
+  }
+  return raw;
+}
+
 const warm = () => {
   if (warmed) return;
   warmed = true;
   ensureKuroshiro().catch(err => {
-    setStatus('分词器加载失败：' + err.message + ' · 点击页面任意位置重试', true);
+    setStatus('分词器加载失败：' + formatKuroshiroInitError(err) + ' · 点击页面任意位置重试', true);
     // allow retry on next user interaction
     warmed = false;
     kuroshiroFailed = false;

@@ -8,17 +8,27 @@ const lyricsView = $('#lyrics-view');
 const statusEl = $('#status');
 const searchInput = $('#search-input');
 const searchResults = $('#search-results');
+const assistActions = $('#assist-actions');
 const biliWrap = $('#bili-wrap');
 let searchRequestId = 0;
 let biliSearchRequestId = 0;
+let utatenSearchRequestId = 0;
 let latestBiliCandidates = [];
 let latestBiliQuery = '';
+let latestUtatenCandidates = [];
+let latestUtatenQuery = '';
 
 let kuroshiro = null;
 let kuroshiroReady = null;
 let lrcLines = [];
 let activeIdx = -1;
 let translationCache = new Map();
+const assistSearchState = {
+  title: '',
+  artist: '',
+  utaten: { status: 'idle', message: '', count: 0 },
+  bili: { status: 'idle', message: '', count: 0 },
+};
 
 /* ---------------- Theme ---------------- */
 const THEME_KEY = 'jplrc-theme';
@@ -81,6 +91,82 @@ function setStatus(msg, isError = false, action = null) {
   }
 
   statusEl.classList.toggle('error', !!isError);
+}
+
+function resetAssistActions() {
+  biliSearchRequestId++;
+  utatenSearchRequestId++;
+  latestBiliCandidates = [];
+  latestBiliQuery = '';
+  latestUtatenCandidates = [];
+  latestUtatenQuery = '';
+  assistSearchState.title = '';
+  assistSearchState.artist = '';
+  assistSearchState.utaten = { status: 'idle', message: '', count: 0 };
+  assistSearchState.bili = { status: 'idle', message: '', count: 0 };
+  renderAssistActions();
+}
+
+function startAssistActionsForLyric(item) {
+  assistSearchState.title = item?.trackName || '';
+  assistSearchState.artist = item?.artistName || '';
+  assistSearchState.utaten = { status: 'loading', message: '', count: 0 };
+  assistSearchState.bili = { status: 'loading', message: '', count: 0 };
+  renderAssistActions();
+}
+
+function formatAssistState(state) {
+  switch (state.status) {
+    case 'loading': return '搜索中';
+    case 'ready': return `已就绪${state.count ? ` ${state.count} 条` : ''}`;
+    case 'empty': return '无结果';
+    case 'error': return '不可用';
+    default: return '待命';
+  }
+}
+
+function applyAssistButtonState(button, state, labels) {
+  button.textContent = labels[state.status] || labels.idle;
+  button.dataset.state = state.status;
+  button.disabled = state.status !== 'ready';
+}
+
+function renderAssistActions() {
+  if (!assistActions) return;
+  const meta = $('#assist-actions-meta');
+  const utatenBtn = $('#btn-apply-utaten');
+  const biliBtn = $('#btn-open-bili-candidates');
+  const hasContext = !!(
+    assistSearchState.title
+    || assistSearchState.artist
+    || assistSearchState.utaten.status !== 'idle'
+    || assistSearchState.bili.status !== 'idle'
+  );
+  assistActions.hidden = !hasContext;
+  if (!hasContext || !meta || !utatenBtn || !biliBtn) return;
+
+  const label = [assistSearchState.title, assistSearchState.artist].filter(Boolean).join(' · ') || '当前歌词';
+  meta.textContent = `${label} · UtaTen${formatAssistState(assistSearchState.utaten)} · Bilibili${formatAssistState(assistSearchState.bili)}`;
+
+  applyAssistButtonState(utatenBtn, assistSearchState.utaten, {
+    idle: 'UtaTen 待命',
+    loading: 'UtaTen 搜索中...',
+    ready: assistSearchState.utaten.count > 1 ? `应用 UtaTen 注音 (${assistSearchState.utaten.count})` : '应用 UtaTen 注音',
+    empty: 'UtaTen 未找到',
+    error: 'UtaTen 暂不可用',
+  });
+  utatenBtn.title = latestUtatenCandidates[0]
+    ? `将优先应用：${latestUtatenCandidates[0].title}${latestUtatenCandidates[0].artist ? ` - ${latestUtatenCandidates[0].artist}` : ''}`
+    : '';
+
+  applyAssistButtonState(biliBtn, assistSearchState.bili, {
+    idle: 'Bilibili 待命',
+    loading: 'Bilibili 搜索中...',
+    ready: assistSearchState.bili.count > 1 ? `选择 Bilibili 音源 (${assistSearchState.bili.count})` : '选择 Bilibili 音源',
+    empty: 'Bilibili 未找到',
+    error: 'Bilibili 暂不可用',
+  });
+  biliBtn.title = assistSearchState.bili.status === 'ready' ? '打开候选视频列表' : '';
 }
 
 function setPanelCollapsed(collapsed) {
@@ -687,12 +773,14 @@ $('#lrc-file').addEventListener('change', async (e) => {
   $('#lrc-file-name').textContent = f.name;
   const text = await f.text();
   $('#lrc-text').value = text;
+  resetAssistActions();
   loadLrcFromText(text);
 });
 
 $('#btn-load-lrc').addEventListener('click', () => {
   const text = $('#lrc-text').value;
   if (!text.trim()) { setStatus('请先粘贴或上传 LRC 内容', true); return; }
+  resetAssistActions();
   loadLrcFromText(text);
 });
 
@@ -701,6 +789,7 @@ $('#btn-clear').addEventListener('click', () => {
   $('#lrc-file-name').textContent = '未选择 .lrc 文件';
   lyricsView.innerHTML = '<div class="hint-card"><div class="hint-emoji">🧹</div><p>已清空。</p></div>';
   lrcLines = []; activeIdx = -1;
+  resetAssistActions();
   setStatus('');
 });
 
@@ -723,12 +812,11 @@ async function doSearch() {
   const q = searchInput.value.trim();
   if (!q) return;
   const requestId = ++searchRequestId;
+  resetAssistActions();
   setStatus('搜索中...');
   searchResults.hidden = false;
   searchResults.innerHTML = '<div style="padding:12px;color:var(--muted)">搜索中...</div>';
 
-  // Run lrclib only; UtaTen is opened directly on the official site because
-  // cross-origin proxy solutions have become unreliable in the browser.
   const lrclibPromise = fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`)
     .then(r => r.json())
     .catch(e => { console.warn('[lrclib]', e); return { __error: e.message }; });
@@ -768,20 +856,8 @@ async function doSearch() {
       div.innerHTML = `
         <div class="title">${escapeHTML(title)} ${synced ? '<span class="badge">同步</span>' : ''}</div>
         <div class="meta">${escapeHTML(artist)} · ${escapeHTML(item.albumName || '')} · ${formatDur(item.duration)}</div>
-        <div class="row-actions">
-          <button class="btn-mini" data-act="utaten">🎼 UtaTen</button>
-        </div>
       `;
-      // Click on body (excluding action buttons) loads lyrics
-      div.addEventListener('click', (ev) => {
-        if (ev.target.closest('.row-actions')) return;
-        loadFromLrclib(item);
-      });
-      const utaBtn = div.querySelector('[data-act="utaten"]');
-      utaBtn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        utatenSearchByQuery(title, artist);
-      });
+      div.addEventListener('click', () => loadFromLrclib(item));
       searchResults.appendChild(div);
     });
   }
@@ -841,29 +917,44 @@ function renderBiliSearchResults(items, query) {
 }
 
 async function openBilibiliSearchPopoverForLyric(item) {
+  return prefetchBilibiliCandidatesForLyric(item, { openPopover: true });
+}
+
+async function prefetchBilibiliCandidatesForLyric(item, options = {}) {
   const list = $('#bili-search-results');
   const subtitle = $('#bili-search-subtitle');
   if (!list || !subtitle) return;
   const query = `${item.trackName || ''} ${item.artistName || ''}`.trim() || item.trackName || item.artistName || '';
   const requestId = ++biliSearchRequestId;
-  subtitle.textContent = query || '为当前歌词选择 B 站音源';
-  setBiliSearchPopoverOpen(true);
-  list.innerHTML = '<div style="padding:12px;color:var(--muted)">正在搜索 Bilibili 视频...</div>';
+  latestBiliCandidates = [];
+  latestBiliQuery = query;
+  assistSearchState.bili = { status: 'loading', message: '', count: 0 };
+  renderAssistActions();
+  if (options.openPopover) {
+    subtitle.textContent = query || '为当前歌词选择 B 站音源';
+    setBiliSearchPopoverOpen(true);
+    list.innerHTML = '<div style="padding:12px;color:var(--muted)">正在搜索 Bilibili 视频...</div>';
+  }
   const items = await searchBilibiliVideos(query);
   if (requestId !== biliSearchRequestId) return;
   if (Array.isArray(items) && items.length) {
     latestBiliCandidates = items.slice(0, 12);
     latestBiliQuery = query;
-    renderBiliSearchResults(items, query);
-    setStatus(`歌词已载入 · 找到 ${items.length} 条 B 站候选视频`, false, {
-      label: '查看候选',
-      onClick: openLatestBiliCandidates,
-    });
+    assistSearchState.bili = { status: 'ready', message: '', count: latestBiliCandidates.length };
+    renderAssistActions();
+    if (options.openPopover) renderBiliSearchResults(items, query);
   } else {
     latestBiliCandidates = [];
     latestBiliQuery = query;
-    list.innerHTML = `<div style="padding:12px;color:var(--muted)">Bilibili 搜索暂不可用${items?.__error ? `：${escapeHTML(items.__error)}` : ''}</div>`;
-    setStatus('歌词已载入；Bilibili 搜索暂不可用', true);
+    assistSearchState.bili = {
+      status: items?.__error ? 'error' : 'empty',
+      message: items?.__error || '',
+      count: 0,
+    };
+    renderAssistActions();
+    if (options.openPopover) {
+      list.innerHTML = `<div style="padding:12px;color:var(--muted)">Bilibili 搜索暂不可用${items?.__error ? `：${escapeHTML(items.__error)}` : ''}</div>`;
+    }
   }
 }
 
@@ -1012,14 +1103,35 @@ function formatDur(sec) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+function buildFakeLrcFromPlainText(text, stepSeconds = 4) {
+  return String(text || '')
+    .split(/\r?\n+/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const totalSeconds = index * stepSeconds;
+      const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+      const seconds = String(totalSeconds % 60).padStart(2, '0');
+      return `[${minutes}:${seconds}.00]${line}`;
+    })
+    .join('\n');
+}
+
 async function loadFromLrclib(item) {
   searchResults.hidden = true;
-  const lrc = item.syncedLyrics || item.plainLyrics;
+  const syncedLrc = item.syncedLyrics || '';
+  const plainLyrics = item.plainLyrics || '';
+  const lrc = syncedLrc || buildFakeLrcFromPlainText(plainLyrics);
   if (!lrc) { setStatus('该结果无歌词内容', true); return; }
   $('#lrc-text').value = lrc;
-  setStatus(`载入：${item.trackName} - ${item.artistName}`);
+  startAssistActionsForLyric(item);
+  setStatus(`${syncedLrc ? '已载入' : '已载入纯文本歌词'}：${item.trackName} - ${item.artistName}；正在后台搜索 UtaTen 和 Bilibili...`);
   await loadLrcFromText(lrc);
-  openBilibiliSearchPopoverForLyric(item);
+  if (!syncedLrc) switchToTimerMode();
+  void Promise.allSettled([
+    prefetchUtatenCandidatesForLyric(item),
+    prefetchBilibiliCandidatesForLyric(item),
+  ]);
 }
 
 /* ---------------- YouTube ---------------- */
@@ -1196,6 +1308,14 @@ $('#btn-load-bili').addEventListener('click', () => {
 
 $('#btn-close-bili-search')?.addEventListener('click', () => setBiliSearchPopoverOpen(false));
 $('#btn-skip-bili-search')?.addEventListener('click', () => setBiliSearchPopoverOpen(false));
+$('#btn-open-bili-candidates')?.addEventListener('click', openLatestBiliCandidates);
+$('#btn-apply-utaten')?.addEventListener('click', () => {
+  if (!latestUtatenCandidates.length) {
+    setStatus('当前还没有可用的 UtaTen 注音结果', true);
+    return;
+  }
+  loadFromUtaten(latestUtatenCandidates[0]);
+});
 
 /* ---------------- UtaTen (assist with high-quality furigana) ---------------- */
 function utatenBuildSearchUrl(query, artist = '') {
@@ -1349,53 +1469,52 @@ function mergeOverridesFromPairs(pairs) {
   return added;
 }
 
+async function searchUtatenCandidates(title, artist = '') {
+  const q = (title || '').trim();
+  if (!q) return [];
+  const html = await utatenFetchHtml(utatenBuildSearchUrl(q, artist));
+  let items = utatenParseSearch(html);
+  if (artist) {
+    const artistLower = artist.toLowerCase();
+    items = items.slice().sort((left, right) => {
+      const leftHit = (left.artist || '').toLowerCase().includes(artistLower) ? 1 : 0;
+      const rightHit = (right.artist || '').toLowerCase().includes(artistLower) ? 1 : 0;
+      return rightHit - leftHit;
+    });
+  }
+  return items;
+}
+
 async function utatenSearch() {
   const q = $('#utaten-q')?.value.trim();
   if (!q) return;
-  await utatenSearchByQuery(q);
+  return searchUtatenCandidates(q);
 }
 
-async function utatenSearchByQuery(title, artist = '') {
-  const q = (title || '').trim();
-  if (!q) return;
-  searchResults.hidden = false;
-  searchResults.innerHTML = '<div style="padding:12px;color:var(--muted)">UtaTen 搜索中：' + escapeHTML(q) + '...</div>';
-  setStatus('UtaTen 搜索中：' + q);
+async function prefetchUtatenCandidatesForLyric(item) {
+  const title = item?.trackName || '';
+  const artist = item?.artistName || '';
+  const requestId = ++utatenSearchRequestId;
+  latestUtatenCandidates = [];
+  latestUtatenQuery = title;
+  assistSearchState.utaten = { status: 'loading', message: '', count: 0 };
+  renderAssistActions();
   try {
-    const html = await utatenFetchHtml(utatenBuildSearchUrl(q, artist));
-    let items = utatenParseSearch(html);
-    if (artist) {
-      const artistLower = artist.toLowerCase();
-      items = items.slice().sort((left, right) => {
-        const leftHit = (left.artist || '').toLowerCase().includes(artistLower) ? 1 : 0;
-        const rightHit = (right.artist || '').toLowerCase().includes(artistLower) ? 1 : 0;
-        return rightHit - leftHit;
-      });
-    }
+    const items = await searchUtatenCandidates(title, artist);
+    if (requestId !== utatenSearchRequestId) return;
     if (!items.length) {
-      searchResults.innerHTML = '<div style="padding:12px;color:var(--muted)">UtaTen 未找到「' + escapeHTML(q) + '」。</div>';
-      setStatus('');
+      assistSearchState.utaten = { status: 'empty', message: '', count: 0 };
+      renderAssistActions();
       return;
     }
-    searchResults.innerHTML = '';
-    const head = document.createElement('div');
-    head.className = 'search-section-head';
-    head.textContent = `UtaTen 结果 · ${q}`;
-    searchResults.appendChild(head);
-    items.forEach(it => {
-      const div = document.createElement('div');
-      div.className = 'result-item';
-      div.innerHTML = `
-        <div class="title">${escapeHTML(it.title)} <span class="badge">UtaTen</span></div>
-        <div class="meta">${escapeHTML(it.artist || '')} · ID ${escapeHTML(it.id)}</div>
-      `;
-      div.addEventListener('click', () => loadFromUtaten(it));
-      searchResults.appendChild(div);
-    });
-    setStatus(`UtaTen 找到 ${items.length} 条，点击载入歌词 / 读音`);
+    latestUtatenCandidates = items.slice(0, 10);
+    latestUtatenQuery = title;
+    assistSearchState.utaten = { status: 'ready', message: '', count: latestUtatenCandidates.length };
+    renderAssistActions();
   } catch (e) {
-    searchResults.innerHTML = `<div style="padding:12px;color:var(--danger)">UtaTen 搜索失败：${escapeHTML(e.message)}</div>`;
-    setStatus('UtaTen 搜索失败', true);
+    if (requestId !== utatenSearchRequestId) return;
+    assistSearchState.utaten = { status: 'error', message: e.message, count: 0 };
+    renderAssistActions();
   }
 }
 

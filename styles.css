@@ -338,6 +338,57 @@ button.primary:hover { filter: brightness(1.08); }
   letter-spacing: 0.5px;
 }
 
+.assist-actions {
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--panel-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.assist-actions[hidden] { display: none; }
+.assist-actions-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.assist-actions-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  color: var(--muted-2);
+  text-transform: uppercase;
+}
+.assist-actions-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+.assist-actions-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.assist-btn {
+  flex: 1 1 220px;
+  min-width: 0;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 9px 12px;
+}
+.assist-btn[data-state="ready"] {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text-strong);
+}
+.assist-btn[data-state="loading"] {
+  opacity: 0.78;
+}
+.assist-btn:disabled {
+  opacity: 0.56;
+  cursor: default;
+}
+
 /* ===== Section labels ===== */
 .section-label {
   font-size: 11px; font-weight: 600; letter-spacing: 1.4px;
@@ -392,10 +443,6 @@ button.primary:hover { filter: brightness(1.08); }
 .sub-pane { display: none; flex-direction: column; gap: 8px; animation: panelIn .2s ease; }
 .sub-pane.active { display: flex; }
 
-/* Inline UtaTen action button inside lrclib results */
-.result-item .row-actions {
-  display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap;
-}
 .btn-mini {
   font-size: 11px; padding: 4px 10px; border-radius: 999px;
   background: var(--chip-bg); border: 1px solid var(--chip-border);

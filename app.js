@@ -763,9 +763,11 @@ async function doSearch() {
       const div = document.createElement('div');
       div.className = 'result-item';
       const synced = !!item.syncedLyrics;
+      const title = item.trackName || '(无标题)';
+      const artist = item.artistName || '';
       div.innerHTML = `
-        <div class="title">${escapeHTML(item.trackName || '(无标题)')} ${synced ? '<span class="badge">同步</span>' : ''}</div>
-        <div class="meta">${escapeHTML(item.artistName || '')} · ${escapeHTML(item.albumName || '')} · ${formatDur(item.duration)}</div>
+        <div class="title">${escapeHTML(title)} ${synced ? '<span class="badge">同步</span>' : ''}</div>
+        <div class="meta">${escapeHTML(artist)} · ${escapeHTML(item.albumName || '')} · ${formatDur(item.duration)}</div>
         <div class="row-actions">
           <button class="btn-mini" data-act="utaten">🎼 UtaTen</button>
         </div>
@@ -778,7 +780,7 @@ async function doSearch() {
       const utaBtn = div.querySelector('[data-act="utaten"]');
       utaBtn.addEventListener('click', (ev) => {
         ev.stopPropagation();
-        openUtatenSearchForItem(item);
+        utatenSearchByQuery(title, artist);
       });
       searchResults.appendChild(div);
     });
@@ -1195,7 +1197,7 @@ $('#btn-load-bili').addEventListener('click', () => {
 $('#btn-close-bili-search')?.addEventListener('click', () => setBiliSearchPopoverOpen(false));
 $('#btn-skip-bili-search')?.addEventListener('click', () => setBiliSearchPopoverOpen(false));
 
-/* ---------------- UtaTen (official-site fallback) ---------------- */
+/* ---------------- UtaTen (assist with high-quality furigana) ---------------- */
 function utatenBuildSearchUrl(query, artist = '') {
   const u = new URL('https://utaten.com/search');
   if (query) u.searchParams.set('title', query);
@@ -1207,16 +1209,12 @@ function utatenBuildLyricUrl(id) {
   return `https://utaten.com/lyric/${encodeURIComponent(id)}/`;
 }
 
-function openExternalUrl(url) {
-  window.open(url, '_blank', 'noopener,noreferrer');
-}
-
-function openUtatenSearchForItem(item) {
-  const title = item?.trackName || '';
-  const artist = item?.artistName || '';
-  const url = utatenBuildSearchUrl(title, artist);
-  openExternalUrl(url);
-  setStatus('已打开 UtaTen 原站搜索页。当前浏览器环境下跨域抓取不稳定，改为直达原站查看注音。');
+async function utatenFetchHtml(url) {
+  const response = await fetch('https://r.jina.ai/' + url, {
+    headers: { 'X-Return-Format': 'html' }
+  });
+  if (!response.ok) throw new Error('网络错误 ' + response.status);
+  return await response.text();
 }
 
 const RE_KANJI = /[\u3400-\u9fff々ヶ]/;
@@ -1352,15 +1350,88 @@ function mergeOverridesFromPairs(pairs) {
 }
 
 async function utatenSearch() {
-  const q = $('#utaten-q').value.trim();
+  const q = $('#utaten-q')?.value.trim();
   if (!q) return;
-  openExternalUrl(utatenBuildSearchUrl(q));
-  setStatus('已打开 UtaTen 原站搜索页。');
+  await utatenSearchByQuery(q);
+}
+
+async function utatenSearchByQuery(title, artist = '') {
+  const q = (title || '').trim();
+  if (!q) return;
+  searchResults.hidden = false;
+  searchResults.innerHTML = '<div style="padding:12px;color:var(--muted)">UtaTen 搜索中：' + escapeHTML(q) + '...</div>';
+  setStatus('UtaTen 搜索中：' + q);
+  try {
+    const html = await utatenFetchHtml(utatenBuildSearchUrl(q, artist));
+    let items = utatenParseSearch(html);
+    if (artist) {
+      const artistLower = artist.toLowerCase();
+      items = items.slice().sort((left, right) => {
+        const leftHit = (left.artist || '').toLowerCase().includes(artistLower) ? 1 : 0;
+        const rightHit = (right.artist || '').toLowerCase().includes(artistLower) ? 1 : 0;
+        return rightHit - leftHit;
+      });
+    }
+    if (!items.length) {
+      searchResults.innerHTML = '<div style="padding:12px;color:var(--muted)">UtaTen 未找到「' + escapeHTML(q) + '」。</div>';
+      setStatus('');
+      return;
+    }
+    searchResults.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'search-section-head';
+    head.textContent = `UtaTen 结果 · ${q}`;
+    searchResults.appendChild(head);
+    items.forEach(it => {
+      const div = document.createElement('div');
+      div.className = 'result-item';
+      div.innerHTML = `
+        <div class="title">${escapeHTML(it.title)} <span class="badge">UtaTen</span></div>
+        <div class="meta">${escapeHTML(it.artist || '')} · ID ${escapeHTML(it.id)}</div>
+      `;
+      div.addEventListener('click', () => loadFromUtaten(it));
+      searchResults.appendChild(div);
+    });
+    setStatus(`UtaTen 找到 ${items.length} 条，点击载入歌词 / 读音`);
+  } catch (e) {
+    searchResults.innerHTML = `<div style="padding:12px;color:var(--danger)">UtaTen 搜索失败：${escapeHTML(e.message)}</div>`;
+    setStatus('UtaTen 搜索失败', true);
+  }
 }
 
 async function loadFromUtaten(item) {
-  openExternalUrl(utatenBuildLyricUrl(item.id));
-  setStatus(`已打开 UtaTen 歌词页：${item.title}。原站页面自带注音，可直接查看。`);
+  setStatus(`UtaTen 载入：${item.title}...`);
+  try {
+    const html = await utatenFetchHtml(utatenBuildLyricUrl(item.id));
+    const { lines, pairs } = utatenParseLyric(html);
+    if (!Object.keys(pairs).length) {
+      setStatus('UtaTen 页面未能解析出注音', true);
+      return;
+    }
+    const added = mergeOverridesFromPairs(pairs);
+    searchResults.hidden = true;
+
+    const lrcText = $('#lrc-text').value;
+    if (lrcText.trim() && lrcLines.length) {
+      setStatus(`UtaTen ✓ 学到 ${added} 个新读音，正在用新假名重新渲染同步歌词...`);
+      await loadLrcFromText(lrcText);
+    } else if (lines.length) {
+      setStatus(`UtaTen ✓ 学到 ${added} 个新读音，已显示纯文本歌词（无时间轴，请使用计时模式）。`);
+      const fakeLrc = lines.map((line, index) => {
+        const totalSeconds = index * 4;
+        const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+        const seconds = String(totalSeconds % 60).padStart(2, '0');
+        return `[${minutes}:${seconds}.00]${line}`;
+      }).join('\n');
+      $('#lrc-text').value = fakeLrc;
+      await loadLrcFromText(fakeLrc);
+      switchToTimerMode();
+    } else {
+      setStatus(`UtaTen ✓ 学到 ${added} 个新读音。`);
+    }
+  } catch (e) {
+    setStatus('UtaTen 载入失败：' + e.message, true);
+  }
 }
 
 /* ---------------- Init: warm up kuroshiro on first interaction ---------------- */

@@ -6,7 +6,7 @@
 - 🔤 **罗马音 (Romaji)**：Hepburn 拼写
 - 🇨🇳 **中文翻译**：手写或一键自动翻译
 - ⏱ **时间轴同步高亮**：根据音频进度自动滚动并高亮当前行
-- 🔍 **在线搜索导入**：通过 [lrclib.net](https://lrclib.net) 直接搜索带时间轴的歌词
+- 🔍 **在线搜索导入**：通过 [lrclib.net](https://lrclib.net) 搜索带时间轴的歌词，并用 [Kanogoma](https://kanogoma.com/) 补充注音、罗马音和中文翻译
 - 📱 **移动端适配**：响应式布局，触摸友好
 - 🚀 **零构建**：纯 HTML/CSS/JS，可直接部署到 GitHub Pages、Vercel、Netlify、Cloudflare Pages 等
 
@@ -24,7 +24,7 @@
    然后访问 <http://localhost:8080>。
 
 2. **跟唱流程**：
-   - 顶部搜索框输入「歌名 歌手」（如 `夜に駆ける YOASOBI`），点击带「同步」徽章的结果即可载入。
+   - 顶部搜索框输入「歌名 歌手」（如 `夜に駆ける YOASOBI`），点击带「同步」徽章的结果即可载入；选择歌词后会自动尝试从 Kanogoma 补充注音 / 罗马音 / 中文翻译。
    - 在「手动导入 / 上传」处选择本地音频文件（mp3 / m4a / flac…）。
    - 播放音频，歌词会自动滚动并高亮。点击任意一行可跳转到该时间。
    - 顶部胶囊开关可控制是否显示假名 / 罗马音 / 中文，以及是否自动翻译中文。
@@ -51,7 +51,7 @@ git push -u origin main
 | 功能 | 实现 |
 |---|---|
 | 分词 / 注音 | [kuroshiro](https://github.com/hexenq/kuroshiro) + [kuromoji](https://github.com/takuyaa/kuromoji.js)（CDN，纯前端） |
-| 在线歌词 | [lrclib.net](https://lrclib.net) 公共 API（无需 key，CORS 友好） |
+| 在线歌词 / 注音 | [lrclib.net](https://lrclib.net) 同步时间轴 + [Kanogoma](https://kanogoma.com/) 歌词页注音（经 r.jina.ai 读取 HTML） |
 | 中文翻译 | [MyMemory](https://mymemory.translated.net/) 免费 API（每日匿名额度有限，质量一般） |
 | 音频播放 | 原生 `<audio>` 标签，本地文件 `URL.createObjectURL` |
 

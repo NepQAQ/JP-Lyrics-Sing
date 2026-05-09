@@ -474,14 +474,14 @@ button.primary:hover { filter: brightness(1.08); }
 .btn-mini:hover { background: var(--hover); border-color: var(--accent); color: var(--text-strong); }
 .btn-mini.loading { opacity: 0.6; pointer-events: none; }
 
-/* UtaTen results subsection inside the search results panel */
-.utaten-section,
+/* Source subsections inside the search results panel */
+.source-section,
 .bili-section {
   margin-top: 6px; padding: 8px 6px 4px;
   border-top: 1px dashed var(--input-border);
 }
-.utaten-section .utaten-head,
-.bili-section .utaten-head {
+.source-section .source-section-head,
+.bili-section .source-section-head {
   display: flex; align-items: center; gap: 8px;
   font-size: 11px; font-weight: 600; letter-spacing: 1.2px;
   color: var(--muted-2); text-transform: uppercase;
@@ -702,10 +702,17 @@ body.mode-read .lyrics-view {
   font-family: "Zen Maru Gothic", "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
   font-size: 24px; line-height: 2.0; font-weight: 500;
   color: var(--text-strong);
-  word-break: keep-all;
+  max-width: 100%;
+  margin: 0 auto;
+  line-break: loose;
+  word-break: normal;
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
-.jp ruby { margin: 0 1px; }
+.jp ruby {
+  margin: 0 1px;
+  white-space: normal;
+}
 .jp ruby rt {
   font-size: 0.5em;
   color: var(--accent);
@@ -720,14 +727,29 @@ body.mode-read .lyrics-view {
   letter-spacing: 0.6px;
   font-style: italic;
   opacity: 0.85;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  overflow-wrap: break-word;
+  word-break: normal;
+  text-wrap: pretty;
 }
 .zh {
   font-family: "Noto Sans SC", sans-serif;
   font-size: 14px; color: var(--muted); margin-top: 4px;
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+body.mode-read .jp,
+body.mode-read .romaji,
+body.mode-read .zh {
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
 }
 
 .lrc-line.hide-furigana ruby rt { display: none; }

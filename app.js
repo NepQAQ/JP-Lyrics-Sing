@@ -12,11 +12,11 @@ const assistActions = $('#assist-actions');
 const biliWrap = $('#bili-wrap');
 let searchRequestId = 0;
 let biliSearchRequestId = 0;
-let utatenSearchRequestId = 0;
+let kanogomaSearchRequestId = 0;
 let latestBiliCandidates = [];
 let latestBiliQuery = '';
-let latestUtatenCandidates = [];
-let latestUtatenQuery = '';
+let latestKanogomaCandidates = [];
+let latestKanogomaQuery = '';
 
 let kuroshiro = null;
 let kuroshiroReady = null;
@@ -26,7 +26,7 @@ let translationCache = new Map();
 const assistSearchState = {
   title: '',
   artist: '',
-  utaten: { status: 'idle', message: '', count: 0 },
+  kanogoma: { status: 'idle', message: '', count: 0 },
   bili: { status: 'idle', message: '', count: 0 },
 };
 
@@ -95,14 +95,14 @@ function setStatus(msg, isError = false, action = null) {
 
 function resetAssistActions() {
   biliSearchRequestId++;
-  utatenSearchRequestId++;
+  kanogomaSearchRequestId++;
   latestBiliCandidates = [];
   latestBiliQuery = '';
-  latestUtatenCandidates = [];
-  latestUtatenQuery = '';
+  latestKanogomaCandidates = [];
+  latestKanogomaQuery = '';
   assistSearchState.title = '';
   assistSearchState.artist = '';
-  assistSearchState.utaten = { status: 'idle', message: '', count: 0 };
+  assistSearchState.kanogoma = { status: 'idle', message: '', count: 0 };
   assistSearchState.bili = { status: 'idle', message: '', count: 0 };
   renderAssistActions();
 }
@@ -110,7 +110,7 @@ function resetAssistActions() {
 function startAssistActionsForLyric(item) {
   assistSearchState.title = item?.trackName || '';
   assistSearchState.artist = item?.artistName || '';
-  assistSearchState.utaten = { status: 'loading', message: '', count: 0 };
+  assistSearchState.kanogoma = { status: 'loading', message: '', count: 0 };
   assistSearchState.bili = { status: 'loading', message: '', count: 0 };
   renderAssistActions();
 }
@@ -134,29 +134,29 @@ function applyAssistButtonState(button, state, labels) {
 function renderAssistActions() {
   if (!assistActions) return;
   const meta = $('#assist-actions-meta');
-  const utatenBtn = $('#btn-apply-utaten');
+  const kanogomaBtn = $('#btn-apply-kanogoma');
   const biliBtn = $('#btn-open-bili-candidates');
   const hasContext = !!(
     assistSearchState.title
     || assistSearchState.artist
-    || assistSearchState.utaten.status !== 'idle'
+    || assistSearchState.kanogoma.status !== 'idle'
     || assistSearchState.bili.status !== 'idle'
   );
   assistActions.hidden = !hasContext;
-  if (!hasContext || !meta || !utatenBtn || !biliBtn) return;
+  if (!hasContext || !meta || !kanogomaBtn || !biliBtn) return;
 
   const label = [assistSearchState.title, assistSearchState.artist].filter(Boolean).join(' · ') || '当前歌词';
-  meta.textContent = `${label} · UtaTen${formatAssistState(assistSearchState.utaten)} · Bilibili${formatAssistState(assistSearchState.bili)}`;
+  meta.textContent = `${label} · Kanogoma${formatAssistState(assistSearchState.kanogoma)} · Bilibili${formatAssistState(assistSearchState.bili)}`;
 
-  applyAssistButtonState(utatenBtn, assistSearchState.utaten, {
-    idle: 'UtaTen 待命',
-    loading: 'UtaTen 搜索中...',
-    ready: assistSearchState.utaten.count > 1 ? `应用 UtaTen 注音 (${assistSearchState.utaten.count})` : '应用 UtaTen 注音',
-    empty: 'UtaTen 未找到',
-    error: 'UtaTen 暂不可用',
+  applyAssistButtonState(kanogomaBtn, assistSearchState.kanogoma, {
+    idle: 'Kanogoma 待命',
+    loading: 'Kanogoma 搜索中...',
+    ready: assistSearchState.kanogoma.count > 1 ? `应用 Kanogoma 注音 (${assistSearchState.kanogoma.count})` : '应用 Kanogoma 注音',
+    empty: 'Kanogoma 未找到',
+    error: 'Kanogoma 暂不可用',
   });
-  utatenBtn.title = latestUtatenCandidates[0]
-    ? `将优先应用：${latestUtatenCandidates[0].title}${latestUtatenCandidates[0].artist ? ` - ${latestUtatenCandidates[0].artist}` : ''}`
+  kanogomaBtn.title = latestKanogomaCandidates[0]
+    ? `将优先应用：${latestKanogomaCandidates[0].title}${latestKanogomaCandidates[0].artist ? ` - ${latestKanogomaCandidates[0].artist}` : ''}`
     : '';
 
   applyAssistButtonState(biliBtn, assistSearchState.bili, {
@@ -468,16 +468,28 @@ const HIRA_ROMAJI = {
 };
 function kanaToRomajiSimple(s) {
   // Handle small-y combos (きゃ etc) and small tsu doubling roughly.
-  let out = ''; const small = { 'ゃ':'ya','ゅ':'yu','ょ':'yo' };
+  let out = '';
+  const combo = {
+    'きゃ':'kya','きゅ':'kyu','きょ':'kyo','ぎゃ':'gya','ぎゅ':'gyu','ぎょ':'gyo',
+    'しゃ':'sha','しゅ':'shu','しょ':'sho','じゃ':'ja','じゅ':'ju','じょ':'jo',
+    'ちゃ':'cha','ちゅ':'chu','ちょ':'cho','にゃ':'nya','にゅ':'nyu','にょ':'nyo',
+    'ひゃ':'hya','ひゅ':'hyu','ひょ':'hyo','びゃ':'bya','びゅ':'byu','びょ':'byo',
+    'ぴゃ':'pya','ぴゅ':'pyu','ぴょ':'pyo','みゃ':'mya','みゅ':'myu','みょ':'myo',
+    'りゃ':'rya','りゅ':'ryu','りょ':'ryo','ふぁ':'fa','ふぃ':'fi','ふぇ':'fe','ふぉ':'fo',
+    'てぃ':'ti','でぃ':'di','とぅ':'tu','どぅ':'du','うぃ':'wi','うぇ':'we','うぉ':'wo',
+    'しぇ':'she','じぇ':'je','ちぇ':'che','つぁ':'tsa','つぃ':'tsi','つぇ':'tse','つぉ':'tso',
+  };
   for (let i = 0; i < s.length; i++) {
     const ch = s[i], next = s[i + 1];
-    if (next && small[next]) {
-      const base = HIRA_ROMAJI[ch] || ch;
-      out += base.replace(/i$/, '') + small[next];
+    const pair = ch + (next || '');
+    if (next && combo[pair]) {
+      out += combo[pair];
       i++;
     } else if (ch === 'っ' && next) {
-      const r = HIRA_ROMAJI[next] || '';
+      const r = combo[pair] || HIRA_ROMAJI[next] || '';
       out += r[0] || '';
+    } else if (/^[ぁぃぅぇぉゃゅょ]$/.test(ch)) {
+      out += HIRA_ROMAJI[ch.replace(/[ぁぃぅぇぉゃゅょ]/, m => ({ 'ぁ':'あ','ぃ':'い','ぅ':'う','ぇ':'え','ぉ':'お','ゃ':'や','ゅ':'ゆ','ょ':'よ' }[m]))] || '';
     } else {
       out += HIRA_ROMAJI[ch] ?? ch;
     }
@@ -602,7 +614,7 @@ async function renderLyrics(parsed) {
     el.className = 'lrc-line';
     el.dataset.idx = i;
     el.innerHTML = `
-      <div class="jp">${escapeHTML(p.text)}</div>
+      <div class="jp">${p.jpHTML || escapeHTML(p.text)}</div>
       <div class="romaji"></div>
       <div class="zh"></div>
     `;
@@ -620,13 +632,20 @@ async function renderLyrics(parsed) {
   const autoTranslate = $('#auto-translate').checked;
   for (let i = 0; i < lrcLines.length; i++) {
     const ln = lrcLines[i];
-    try {
-      const { html, romaji } = await toFurigana(ln.text);
-      ln.jpHTML = html;
-      ln.romaji = romaji;
-      ln.el.querySelector('.jp').innerHTML = html || escapeHTML(ln.text);
-      ln.el.querySelector('.romaji').textContent = romaji || '';
-    } catch (e) { /* ignore */ }
+    const needsGeneratedRomaji = !ln.romaji || !hasWordSpacedRomaji(ln.romaji);
+    if (ln.jpHTML && !needsGeneratedRomaji) {
+      ln.el.querySelector('.jp').innerHTML = ln.jpHTML;
+      ln.el.querySelector('.romaji').textContent = ln.romaji || '';
+    } else {
+      try {
+        const { html, romaji } = await toFurigana(ln.text);
+        if (!ln.jpHTML) ln.jpHTML = html;
+        if (romaji) ln.romaji = romaji;
+        ln.el.querySelector('.jp').innerHTML = ln.jpHTML || html || escapeHTML(ln.text);
+        ln.el.querySelector('.romaji').textContent = romaji || ln.romaji || '';
+      } catch (e) { /* ignore */ }
+    }
+    if (ln.zh) ln.el.querySelector('.zh').textContent = ln.zh;
     if (i % 10 === 0) setStatus(`处理歌词中 ${i + 1}/${lrcLines.length}...`);
   }
   setStatus(`已就绪 ✓ 共 ${lrcLines.length} 行`);
@@ -635,6 +654,7 @@ async function renderLyrics(parsed) {
     setStatus('正在翻译中文（受 API 速率限制，可能较慢）...');
     for (let i = 0; i < lrcLines.length; i++) {
       const ln = lrcLines[i];
+      if (ln.zh) continue;
       const zh = await translateToZh(ln.text);
       ln.zh = zh;
       ln.el.querySelector('.zh').textContent = zh;
@@ -648,6 +668,16 @@ function escapeHTML(s) {
   return s.replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[c]));
+}
+
+function hasWordSpacedRomaji(romaji) {
+  const text = String(romaji || '').replace(/\u3000/g, ' ').trim();
+  if (!text) return false;
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length < 3) return false;
+  const latinWords = words.filter(word => /[a-z]/i.test(word));
+  if (latinWords.length < 3) return false;
+  return !latinWords.some(word => word.length > 18);
 }
 
 /* ---------------- Playback abstraction (audio + YouTube + Bilibili/timer) ---------------- */
@@ -916,7 +946,7 @@ function renderBiliSearchResults(items, query) {
   if (Array.isArray(items) && items.length) {
     const sec = document.createElement('div');
     sec.className = 'bili-section';
-    sec.innerHTML = `<div class="utaten-head">📺 ${escapeHTML(query)} 的 Bilibili 候选视频</div>`;
+    sec.innerHTML = `<div class="source-section-head">📺 ${escapeHTML(query)} 的 Bilibili 候选视频</div>`;
     items.slice(0, 12).forEach(it => {
       const div = document.createElement('div');
       div.className = 'result-item bili-result';
@@ -1152,11 +1182,11 @@ async function loadFromLrclib(item) {
   if (!lrc) { setStatus('该结果无歌词内容', true); return; }
   $('#lrc-text').value = lrc;
   startAssistActionsForLyric(item);
-  setStatus(`${syncedLrc ? '已载入' : '已载入纯文本歌词'}：${item.trackName} - ${item.artistName}；正在后台搜索 UtaTen 和 Bilibili...`);
+  setStatus(`${syncedLrc ? '已载入' : '已载入纯文本歌词'}：${item.trackName} - ${item.artistName}；正在后台搜索 Kanogoma 和 Bilibili...`);
   await loadLrcFromText(lrc);
   if (!syncedLrc) switchToTimerMode();
   void Promise.allSettled([
-    prefetchUtatenCandidatesForLyric(item),
+    prefetchKanogomaCandidatesForLyric(item),
     prefetchBilibiliCandidatesForLyric(item),
   ]);
 }
@@ -1336,27 +1366,23 @@ $('#btn-load-bili').addEventListener('click', () => {
 $('#btn-close-bili-search')?.addEventListener('click', () => setBiliSearchPopoverOpen(false));
 $('#btn-skip-bili-search')?.addEventListener('click', () => setBiliSearchPopoverOpen(false));
 $('#btn-open-bili-candidates')?.addEventListener('click', openLatestBiliCandidates);
-$('#btn-apply-utaten')?.addEventListener('click', () => {
-  if (!latestUtatenCandidates.length) {
-    setStatus('当前还没有可用的 UtaTen 注音结果', true);
+$('#btn-apply-kanogoma')?.addEventListener('click', () => {
+  if (!latestKanogomaCandidates.length) {
+    setStatus('当前还没有可用的 Kanogoma 注音结果', true);
     return;
   }
-  loadFromUtaten(latestUtatenCandidates[0]);
+  loadFromKanogoma(latestKanogomaCandidates[0]);
 });
 
-/* ---------------- UtaTen (assist with high-quality furigana) ---------------- */
-function utatenBuildSearchUrl(query, artist = '') {
-  const u = new URL('https://utaten.com/search');
-  if (query) u.searchParams.set('title', query);
-  if (artist) u.searchParams.set('artist_name', artist);
+/* ---------------- Kanogoma (lyrics + high-quality furigana) ---------------- */
+function kanogomaBuildSearchUrl(query) {
+  const u = new URL('https://kanogoma.com/wp-json/wp/v2/song');
+  u.searchParams.set('search', query);
+  u.searchParams.set('per_page', '12');
   return u.toString();
 }
 
-function utatenBuildLyricUrl(id) {
-  return `https://utaten.com/lyric/${encodeURIComponent(id)}/`;
-}
-
-async function utatenFetchHtml(url) {
+async function kanogomaFetchHtml(url) {
   const response = await fetch('https://r.jina.ai/' + url, {
     headers: { 'X-Return-Format': 'html' }
   });
@@ -1366,122 +1392,189 @@ async function utatenFetchHtml(url) {
 
 const RE_KANJI = /[\u3400-\u9fff々ヶ]/;
 
-function utatenParseSearch(text) {
-  // Real HTML path (in case the proxy ever returns HTML again).
-  if (/<a\s+href=/i.test(text)) {
-    try {
-      const doc = new DOMParser().parseFromString(text, 'text/html');
-      const out = [];
-      const seen = new Set();
-      doc.querySelectorAll('a[href*="/lyric/"]').forEach(a => {
-        const m = a.getAttribute('href').match(/\/lyric\/([\w-]+)\//);
-        if (!m) return;
-        const id = m[1];
-        if (seen.has(id)) return;
-        const title = (a.textContent || '').trim();
-        if (!title || title.length > 80) return;
-        const row = a.closest('tr');
-        let artist = '';
-        if (row) {
-          const aArtist = row.querySelector('a[href*="/artist/"]');
-          if (aArtist) artist = aArtist.textContent.trim();
-        }
-        seen.add(id);
-        out.push({ id, title, artist });
-      });
-      if (out.length) return out.slice(0, 30);
-    } catch {}
-  }
-  // Markdown fallback. Only count entries whose lyric link is followed by an
-  // artist link nearby — this filters out sidebar "おすすめ" rows.
-  const out = [];
-  const seen = new Set();
-  const re = /\[([^\]\n]{1,80})\]\(https:\/\/utaten\.com\/lyric\/([\w-]+)\/\)\s*(?:\||\s)*\s*\[([^\]\n]{1,80})\]\(https:\/\/utaten\.com\/artist\/[\w%-]+\/?\)/g;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const [, title, id, artist] = m;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    out.push({ id, title: title.trim(), artist: artist.trim() });
-    if (out.length >= 30) break;
-  }
-  return out;
+function decodeHtmlText(text) {
+  const el = document.createElement('textarea');
+  el.innerHTML = text || '';
+  return el.value;
 }
 
-function utatenParseLyric(text) {
-  // 1) HTML path (legacy).
-  if (/<span\s+class=["']ruby["']/i.test(text)) {
-    try {
-      const doc = new DOMParser().parseFromString(text, 'text/html');
-      const body = doc.querySelector('.hiragana') || doc.querySelector('.romaji') || doc.querySelector('.lyricBody .medium');
-      if (body) {
-        const pairs = {};
-        body.querySelectorAll('span.ruby').forEach(sp => {
-          const rb = sp.querySelector('.rb')?.textContent.trim();
-          const rt = sp.querySelector('.rt')?.textContent.trim();
-          if (rb && rt && RE_KANJI.test(rb) && !pairs[rb]) pairs[rb] = rt;
-        });
-        const clone = body.cloneNode(true);
-        clone.querySelectorAll('span.ruby').forEach(sp => {
-          const rb = sp.querySelector('.rb')?.textContent || '';
-          sp.replaceWith(document.createTextNode(rb));
-        });
-        clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
-        const lines = clone.textContent.replace(/\u00a0/g, ' ')
-          .split(/\n+/).map(s => s.trim()).filter(Boolean);
-        if (Object.keys(pairs).length) return { lines, pairs };
+function kanogomaTitleFromSlug(slug = '') {
+  const decoded = decodeURIComponent(String(slug).replace(/\+/g, '%20'));
+  const parts = decoded.split('-').filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts.shift().toUpperCase()} - ${parts.join('-')}`;
+  }
+  return decoded || '(无标题)';
+}
+
+function kanogomaArtistFromItem(item) {
+  const artistClass = (item.class_list || []).find(name => name.startsWith('kngm_artist-')) || '';
+  const raw = artistClass.replace(/^kngm_artist-/, '').replace(/-/g, ' ');
+  return raw ? raw.replace(/\b\w/g, c => c.toUpperCase()) : '';
+}
+
+function normalizeLyricText(text) {
+  return String(text || '')
+    .replace(/[\s\u3000]+/g, '')
+    .replace(/[「」『』“”\"'’‘.,，。！？!?…・･♪\-－—–~〜]/g, '')
+    .toLowerCase();
+}
+
+function textFromRubyElement(el) {
+  const clone = el.cloneNode(true);
+  clone.querySelectorAll('rt').forEach(rt => rt.remove());
+  return (clone.textContent || '').replace(/\u00a0/g, ' ').trim();
+}
+
+function kanaToHiragana(text) {
+  return String(text || '').replace(/[\u30a1-\u30f6]/g, ch =>
+    String.fromCharCode(ch.charCodeAt(0) - 0x60)
+  );
+}
+
+function splitLeadingOkurigana(chunk) {
+  const markers = ['その', 'この', 'あの', 'どの', 'ここ', 'そこ', 'どこ', 'こと', 'もの', 'とこ', 'から', 'まで', 'だけ', 'でも', 'なら', 'より', 'って', 'さえ'];
+  let splitAt = chunk.length;
+  for (const marker of markers) {
+    const pos = chunk.indexOf(marker);
+    if (pos > 0 && pos < splitAt) splitAt = pos;
+  }
+  return [chunk.slice(0, splitAt), chunk.slice(splitAt)];
+}
+
+function pushKanaWord(words, kana) {
+  const normalized = kanaToHiragana(kana).replace(/\s+/g, '');
+  if (!normalized) return;
+  const romaji = kanaToRomajiSimple(normalized).replace(/-/g, '');
+  if (romaji) words.push(romaji);
+}
+
+function splitStandaloneHiraganaWords(chunk) {
+  const protectedWords = ['それ', 'これ', 'あれ', 'その', 'この', 'あの', 'どの', 'ここ', 'そこ', 'どこ', 'こと', 'もの', 'とこ', 'ない'];
+  const particles = ['さえ', 'なら', 'から', 'まで', 'だけ', 'でも', 'より', 'って', 'は', 'が', 'を', 'に', 'へ', 'で', 'と', 'も', 'の', 'や', 'か'];
+  const out = [];
+  let rest = chunk;
+  while (rest) {
+    const protectedHit = protectedWords.find(word => rest.startsWith(word));
+    if (protectedHit) {
+      out.push(protectedHit);
+      rest = rest.slice(protectedHit.length);
+      continue;
+    }
+    const particleHit = particles.find(word => rest.startsWith(word));
+    if (particleHit) {
+      out.push(particleHit);
+      rest = rest.slice(particleHit.length);
+      continue;
+    }
+    let nextAt = rest.length;
+    for (const word of [...protectedWords, ...particles]) {
+      const pos = rest.indexOf(word, 1);
+      if (pos > 0 && pos < nextAt) nextAt = pos;
+    }
+    out.push(rest.slice(0, nextAt));
+    rest = rest.slice(nextAt);
+  }
+  return out.filter(Boolean);
+}
+
+function pushPlainKanaWords(words, text) {
+  const parts = String(text || '').split(/([\s\u3000、。,.，.!！?？「」『』（）()\[\]【】]+|[\u30a0-\u30ffー]+|[A-Za-z0-9]+)/g).filter(Boolean);
+  for (const part of parts) {
+    if (/^[\s\u3000、。,.，.!！?？「」『』（）()\[\]【】]+$/.test(part)) continue;
+    if (/^[A-Za-z0-9]+$/.test(part)) { words.push(part.toLowerCase()); continue; }
+    if (/^[\u30a0-\u30ffー]+$/.test(part)) { pushKanaWord(words, part); continue; }
+    const hira = kanaToHiragana(part);
+    if (/^[\u3041-\u3096ー]+$/.test(hira)) {
+      splitStandaloneHiraganaWords(hira).forEach(word => pushKanaWord(words, word));
+    }
+  }
+}
+
+function kanogomaRomajiFromRubyElement(rubyEl) {
+  const words = [];
+  let pendingRuby = '';
+
+  const flushPending = () => {
+    if (!pendingRuby) return;
+    pushKanaWord(words, pendingRuby);
+    pendingRuby = '';
+  };
+
+  rubyEl.childNodes.forEach(node => {
+    if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === 'ruby') {
+      flushPending();
+      pendingRuby = node.querySelector('rt')?.textContent?.trim() || '';
+      return;
+    }
+
+    const text = node.textContent || '';
+    if (!text.trim()) {
+      flushPending();
+      return;
+    }
+
+    if (pendingRuby) {
+      const leading = text.match(/^[\u3041-\u3096ー]+/)?.[0] || '';
+      if (leading && !/^(の|は|が|を|に|へ|で|と|も|や|か)$/.test(leading)) {
+        const [okurigana, rest] = splitLeadingOkurigana(leading);
+        pendingRuby += okurigana;
+        flushPending();
+        pushPlainKanaWords(words, rest + text.slice(leading.length));
+      } else {
+        flushPending();
+        pushPlainKanaWords(words, text);
       }
-    } catch {}
-  }
+    } else {
+      pushPlainKanaWords(words, text);
+    }
+  });
 
-  // 2) Markdown fallback. UtaTen renders furigana inline as `汉字 假名`.
-  // Slice out only the furigana section to avoid the romaji repeat (which uses
-  // latin letters as the reading marker, e.g. `沈 shizu むように`) and unrelated
-  // navigation/footer text.
-  let body = text;
-  const startMatches = [
-    /文字サイズ\s+ふりがな\s+ダークモード/,
-    /ふりがな\s+ダークモード/,
-    /## .*?歌詞\s*\n/,
-  ];
-  for (const re of startMatches) {
-    const m = body.match(re);
-    if (m) { body = body.slice(m.index + m[0].length); break; }
-  }
-  const endMatches = [
-    /\[この歌詞へのご意見\]/,
-    /\[みんなのレビュー/,
-    /## .*?の人気歌詞ランキング/,
-    /の特集を全て見る/,
-  ];
-  for (const re of endMatches) {
-    const m = body.match(re);
-    if (m) { body = body.slice(0, m.index); break; }
-  }
+  flushPending();
+  return words.join(' ').replace(/\s+/g, ' ').trim();
+}
 
-  // Extract `汉字+ 空白 假名+` pairs.
+function kanogomaParseLyric(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const title = doc.querySelector('article h1, h1')?.textContent?.trim() || '';
+  const body = doc.querySelector('#kngm');
+  if (!body) return { title, lines: [], pairs: {} };
+
   const pairs = {};
-  const pairRe = /([\u3400-\u9fff々ヶ]+)[ \t\u3000]+([\u3041-\u3096ー]+)/g;
-  let m;
-  while ((m = pairRe.exec(body)) !== null) {
-    const kanji = m[1], kana = m[2];
-    if (kana.length > 10) continue; // sanity
-    if (!pairs[kanji]) pairs[kanji] = kana;
-  }
+  const lines = [];
+  body.querySelectorAll(':scope > div').forEach(row => {
+    const rubyEl = row.querySelector('p.ruby');
+    if (!rubyEl) return;
+    rubyEl.querySelectorAll('ruby').forEach(ruby => {
+      const clone = ruby.cloneNode(true);
+      const rt = clone.querySelector('rt');
+      const kana = rt?.textContent?.trim() || '';
+      if (rt) rt.remove();
+      const kanji = clone.textContent.trim();
+      if (kanji && kana && RE_KANJI.test(kanji) && !pairs[kanji]) pairs[kanji] = kana;
+    });
+    const text = textFromRubyElement(rubyEl);
+    if (!text) return;
+    lines.push({
+      text,
+      jpHTML: rubyEl.innerHTML.trim(),
+      romaji: kanogomaRomajiFromRubyElement(rubyEl) || row.querySelector('p.rmj')?.textContent?.trim() || '',
+      zh: row.querySelector('p.zh')?.textContent?.trim() || '',
+    });
+  });
+  return { title, lines, pairs };
+}
 
-  // Best-effort lyric line extraction: drop the kana annotations to recover
-  // kanji-only text, then split on line breaks.
-  const stripped = body
-    .replace(pairRe, '$1')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/[ \t]+/g, ' ');
-  const lines = stripped.split(/\n+/)
-    .map(s => s.trim())
-    .filter(s => s && s.length < 80
-      && /[\u3041-\u309f\u30a0-\u30ff\u3400-\u9fff]/.test(s));
-
-  return { lines, pairs };
+function kanogomaResultFromItem(item) {
+  const slug = item.slug || item.link?.match(/\/song\/([^/]+)\/?/)?.[1] || '';
+  const renderedTitle = stripHTML(item.title?.rendered || '').trim();
+  return {
+    id: item.id,
+    url: item.link || `https://kanogoma.com/song/${slug}/`,
+    slug,
+    title: decodeHtmlText(renderedTitle) || kanogomaTitleFromSlug(slug),
+    artist: kanogomaArtistFromItem(item),
+  };
 }
 
 function mergeOverridesFromPairs(pairs) {
@@ -1496,87 +1589,121 @@ function mergeOverridesFromPairs(pairs) {
   return added;
 }
 
-async function searchUtatenCandidates(title, artist = '') {
-  const q = (title || '').trim();
+async function searchKanogomaCandidates(title, artist = '') {
+  const q = [title, artist].filter(Boolean).join(' ').trim();
   if (!q) return [];
-  const html = await utatenFetchHtml(utatenBuildSearchUrl(q, artist));
-  let items = utatenParseSearch(html);
+  const response = await fetch(kanogomaBuildSearchUrl(q), { credentials: 'omit' });
+  if (!response.ok) throw new Error('网络错误 ' + response.status);
+  let items = await response.json();
+  items = Array.isArray(items) ? items.map(kanogomaResultFromItem) : [];
   if (artist) {
     const artistLower = artist.toLowerCase();
     items = items.slice().sort((left, right) => {
-      const leftHit = (left.artist || '').toLowerCase().includes(artistLower) ? 1 : 0;
-      const rightHit = (right.artist || '').toLowerCase().includes(artistLower) ? 1 : 0;
+      const leftText = `${left.title} ${left.artist}`.toLowerCase();
+      const rightText = `${right.title} ${right.artist}`.toLowerCase();
+      const leftHit = leftText.includes(artistLower) ? 1 : 0;
+      const rightHit = rightText.includes(artistLower) ? 1 : 0;
       return rightHit - leftHit;
     });
   }
   return items;
 }
 
-async function utatenSearch() {
-  const q = $('#utaten-q')?.value.trim();
-  if (!q) return;
-  return searchUtatenCandidates(q);
-}
-
-async function prefetchUtatenCandidatesForLyric(item) {
+async function prefetchKanogomaCandidatesForLyric(item) {
   const title = item?.trackName || '';
   const artist = item?.artistName || '';
-  const requestId = ++utatenSearchRequestId;
-  latestUtatenCandidates = [];
-  latestUtatenQuery = title;
-  assistSearchState.utaten = { status: 'loading', message: '', count: 0 };
+  const requestId = ++kanogomaSearchRequestId;
+  latestKanogomaCandidates = [];
+  latestKanogomaQuery = title;
+  assistSearchState.kanogoma = { status: 'loading', message: '', count: 0 };
   renderAssistActions();
   try {
-    const items = await searchUtatenCandidates(title, artist);
-    if (requestId !== utatenSearchRequestId) return;
+    const items = await searchKanogomaCandidates(title, artist);
+    if (requestId !== kanogomaSearchRequestId) return;
     if (!items.length) {
-      assistSearchState.utaten = { status: 'empty', message: '', count: 0 };
+      assistSearchState.kanogoma = { status: 'empty', message: '', count: 0 };
       renderAssistActions();
       return;
     }
-    latestUtatenCandidates = items.slice(0, 10);
-    latestUtatenQuery = title;
-    assistSearchState.utaten = { status: 'ready', message: '', count: latestUtatenCandidates.length };
+    latestKanogomaCandidates = items.slice(0, 10);
+    latestKanogomaQuery = title;
+    assistSearchState.kanogoma = { status: 'ready', message: '', count: latestKanogomaCandidates.length };
     renderAssistActions();
   } catch (e) {
-    if (requestId !== utatenSearchRequestId) return;
-    assistSearchState.utaten = { status: 'error', message: e.message, count: 0 };
+    if (requestId !== kanogomaSearchRequestId) return;
+    assistSearchState.kanogoma = { status: 'error', message: e.message, count: 0 };
     renderAssistActions();
   }
 }
 
-async function loadFromUtaten(item) {
-  setStatus(`UtaTen 载入：${item.title}...`);
+function buildTimedLinesFromKanogoma(lines, stepSeconds = 4) {
+  return lines.map((line, index) => ({
+    time: index * stepSeconds,
+    text: line.text,
+    jpHTML: line.jpHTML,
+    romaji: line.romaji,
+    zh: line.zh,
+  }));
+}
+
+async function applyKanogomaToCurrentLyrics(data) {
+  const byText = new Map();
+  for (const line of data.lines) {
+    const key = normalizeLyricText(line.text);
+    if (key && !byText.has(key)) byText.set(key, line);
+  }
+  let applied = 0;
+  for (const ln of lrcLines) {
+    const hit = byText.get(normalizeLyricText(ln.text));
+    if (!hit) continue;
+    ln.jpHTML = hit.jpHTML;
+    ln.romaji = hit.romaji;
+    if (!hasWordSpacedRomaji(ln.romaji)) {
+      try {
+        const generated = await toFurigana(ln.text);
+        if (generated.romaji) ln.romaji = generated.romaji;
+      } catch {}
+    }
+    ln.zh = hit.zh;
+    ln.el.querySelector('.jp').innerHTML = hit.jpHTML || escapeHTML(ln.text);
+    ln.el.querySelector('.romaji').textContent = ln.romaji || '';
+    ln.el.querySelector('.zh').textContent = hit.zh || '';
+    applied++;
+  }
+  return applied;
+}
+
+async function loadFromKanogoma(item) {
+  setStatus(`Kanogoma 载入：${item.title}...`);
   try {
-    const html = await utatenFetchHtml(utatenBuildLyricUrl(item.id));
-    const { lines, pairs } = utatenParseLyric(html);
-    if (!Object.keys(pairs).length) {
-      setStatus('UtaTen 页面未能解析出注音', true);
+    const html = await kanogomaFetchHtml(item.url);
+    const data = kanogomaParseLyric(html);
+    if (!data.lines.length) {
+      setStatus('Kanogoma 页面未能解析出歌词', true);
       return;
     }
-    const added = mergeOverridesFromPairs(pairs);
+    const added = mergeOverridesFromPairs(data.pairs);
     searchResults.hidden = true;
 
     const lrcText = $('#lrc-text').value;
     if (lrcText.trim() && lrcLines.length) {
-      setStatus(`UtaTen ✓ 学到 ${added} 个新读音，正在用新假名重新渲染同步歌词...`);
-      await loadLrcFromText(lrcText);
-    } else if (lines.length) {
-      setStatus(`UtaTen ✓ 学到 ${added} 个新读音，已显示纯文本歌词（无时间轴，请使用计时模式）。`);
-      const fakeLrc = lines.map((line, index) => {
-        const totalSeconds = index * 4;
-        const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
-        const seconds = String(totalSeconds % 60).padStart(2, '0');
-        return `[${minutes}:${seconds}.00]${line}`;
-      }).join('\n');
-      $('#lrc-text').value = fakeLrc;
-      await loadLrcFromText(fakeLrc);
-      switchToTimerMode();
+      const applied = await applyKanogomaToCurrentLyrics(data);
+      if (applied) {
+        applyToggleClasses();
+        setStatus(`Kanogoma ✓ 已应用 ${applied} 行注音/罗马音/中文，学到 ${added} 个新读音。`);
+      } else {
+        setStatus(`Kanogoma ✓ 学到 ${added} 个新读音，未找到可直接匹配的同步歌词行，正在重新渲染本地注音...`);
+        await loadLrcFromText(lrcText);
+      }
     } else {
-      setStatus(`UtaTen ✓ 学到 ${added} 个新读音。`);
+      const fakeLrc = buildFakeLrcFromPlainText(data.lines.map(line => line.text).join('\n'));
+      $('#lrc-text').value = fakeLrc;
+      await renderLyrics(buildTimedLinesFromKanogoma(data.lines));
+      switchToTimerMode();
+      setStatus(`Kanogoma ✓ 已显示歌词、注音、罗马音和中文翻译（无时间轴，请使用计时模式）。`);
     }
   } catch (e) {
-    setStatus('UtaTen 载入失败：' + e.message, true);
+    setStatus('Kanogoma 载入失败：' + e.message, true);
   }
 }
 

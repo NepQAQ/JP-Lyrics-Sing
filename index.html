@@ -23,6 +23,9 @@
       <h1>日语跟唱<span class="brand-sub">JP Lyrics Sing</span></h1>
     </div>
     <div class="header-actions">
+      <button id="btn-app-mode" class="app-mode-btn" aria-label="切换歌词与日语学习模式" title="切换歌词与日语学习模式">
+        <span class="app-mode-icon">🎵</span><span class="app-mode-text">歌词</span>
+      </button>
       <button id="btn-mode" class="mode-btn" aria-label="切换跳唱/阅读模式" title="切换跳唱/阅读模式">
         <span class="mode-icon">🎤</span><span class="mode-text">跟唱</span>
       </button>
@@ -163,6 +166,32 @@
     </div>
 
     <div id="status" class="status"></div>
+  </section>
+
+  <section id="study-view" class="study-view" hidden>
+    <div class="study-panel glass">
+      <div class="study-head">
+        <div>
+          <div class="study-title">日语学习</div>
+          <div class="study-subtitle">输入日语句子，生成假名与罗马音</div>
+        </div>
+        <button id="btn-study-speak-all" class="primary" type="button">朗读全部</button>
+      </div>
+      <textarea id="study-input" rows="5" placeholder="例：今日はいい天気ですね。&#10;一緒に日本語を練習しましょう。"></textarea>
+      <div class="row study-actions">
+        <button id="btn-study-convert" class="primary" type="button">转换</button>
+        <button id="btn-study-clear" type="button">清空</button>
+      </div>
+      <div id="study-status" class="status"></div>
+    </div>
+    <div id="study-results" class="study-results">
+      <div class="hint-card">
+        <div class="hint-emoji">📖</div>
+        <p><strong>日语学习模式</strong></p>
+        <p>输入句子后点击转换，会按阅读模式样式显示假名与罗马音。</p>
+        <p class="hint-sub">朗读会优先使用免费日语语音接口，不可用时回退到浏览器日语语音。</p>
+      </div>
+    </div>
   </section>
 
   <main id="lyrics-view" class="lyrics-view" tabindex="0">

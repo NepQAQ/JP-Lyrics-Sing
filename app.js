@@ -5,6 +5,10 @@ const $$ = (sel) => document.querySelectorAll(sel);
 
 const audio = $('#audio');
 const lyricsView = $('#lyrics-view');
+const studyView = $('#study-view');
+const studyInput = $('#study-input');
+const studyResults = $('#study-results');
+const studyStatus = $('#study-status');
 const statusEl = $('#status');
 const searchInput = $('#search-input');
 const searchResults = $('#search-results');
@@ -49,6 +53,32 @@ $('#btn-theme').addEventListener('click', () => {
   applyTheme(cur === 'dark' ? 'light' : 'dark');
 });
 
+/* ---------------- App Mode (lyrics vs study) ---------------- */
+const APP_MODE_KEY = 'jplrc-app-mode';
+function applyAppMode(mode) {
+  const next = mode === 'study' ? 'study' : 'lyrics';
+  document.body.classList.toggle('app-study', next === 'study');
+  if (studyView) studyView.hidden = next !== 'study';
+  const btn = $('#btn-app-mode');
+  if (btn) {
+    btn.querySelector('.app-mode-icon').textContent = next === 'study' ? '📖' : '🎵';
+    btn.querySelector('.app-mode-text').textContent = next === 'study' ? '学习' : '歌词';
+    btn.title = next === 'study' ? '当前：日语学习模式 · 点击切回歌词' : '当前：歌词模式 · 点击切到日语学习';
+    btn.setAttribute('aria-label', next === 'study' ? '切回歌词模式' : '切到日语学习模式');
+  }
+  if (next === 'study') {
+    audio.pause();
+    if (player.mode === 'timer' && player.timerRunning) player.timerToggle();
+  }
+  stopStudySpeech();
+  localStorage.setItem(APP_MODE_KEY, next);
+}
+
+$('#btn-app-mode')?.addEventListener('click', () => {
+  const next = document.body.classList.contains('app-study') ? 'lyrics' : 'study';
+  applyAppMode(next);
+});
+
 /* ---------------- Display Mode (sing-along vs read) ---------------- */
 const MODE_KEY = 'jplrc-mode';
 function applyMode(mode) {
@@ -91,6 +121,12 @@ function setStatus(msg, isError = false, action = null) {
   }
 
   statusEl.classList.toggle('error', !!isError);
+}
+
+function setStudyStatus(msg, isError = false) {
+  if (!studyStatus) return;
+  studyStatus.textContent = msg || '';
+  studyStatus.classList.toggle('error', !!isError);
 }
 
 function resetAssistActions() {
@@ -680,6 +716,273 @@ function hasWordSpacedRomaji(romaji) {
   return !latinWords.some(word => word.length > 18);
 }
 
+/* ---------------- Japanese study mode ---------------- */
+let studyLines = [];
+let studySpeechAudio = null;
+let studySpeechRunId = 0;
+
+function splitJapaneseSentences(text) {
+  return String(text || '')
+    .split(/\r?\n+/)
+    .flatMap(line => (line.trim().match(/[^。！？!?]+[。！？!?]?/g) || [line]))
+    .map(line => line.trim())
+    .filter(Boolean);
+}
+
+function getJapaneseVoice() {
+  const voices = window.speechSynthesis?.getVoices?.() || [];
+  return voices.find(voice => /^ja[-_]/i.test(voice.lang))
+    || voices.find(voice => /japanese|日本/i.test(voice.name))
+    || null;
+}
+
+function waitForSpeechVoices(timeoutMs = 1600) {
+  return new Promise(resolve => {
+    const existing = window.speechSynthesis?.getVoices?.() || [];
+    if (existing.length) {
+      resolve(existing);
+      return;
+    }
+    const timer = setTimeout(() => {
+      window.speechSynthesis?.removeEventListener?.('voiceschanged', onVoicesChanged);
+      resolve(window.speechSynthesis?.getVoices?.() || []);
+    }, timeoutMs);
+    function onVoicesChanged() {
+      clearTimeout(timer);
+      window.speechSynthesis?.removeEventListener?.('voiceschanged', onVoicesChanged);
+      resolve(window.speechSynthesis?.getVoices?.() || []);
+    }
+    window.speechSynthesis?.addEventListener?.('voiceschanged', onVoicesChanged, { once: true });
+  });
+}
+
+async function getJapaneseVoiceAsync() {
+  let voice = getJapaneseVoice();
+  if (voice) return voice;
+  await waitForSpeechVoices();
+  voice = getJapaneseVoice();
+  return voice;
+}
+
+function stopStudySpeech() {
+  studySpeechRunId++;
+  window.speechSynthesis?.cancel?.();
+  if (studySpeechAudio) {
+    studySpeechAudio.pause();
+    studySpeechAudio.src = '';
+    studySpeechAudio = null;
+  }
+}
+
+function buildJapaneseTtsChunks(text, maxLength = 120) {
+  const sentences = splitJapaneseSentences(text);
+  const parts = sentences.length ? sentences : [String(text || '').trim()];
+  const chunks = [];
+  let current = '';
+  for (const part of parts) {
+    if (!part) continue;
+    if ((current + part).length > maxLength && current) {
+      chunks.push(current);
+      current = '';
+    }
+    if (part.length > maxLength) {
+      if (current) {
+        chunks.push(current);
+        current = '';
+      }
+      for (let i = 0; i < part.length; i += maxLength) chunks.push(part.slice(i, i + maxLength));
+      continue;
+    }
+    current += (current && !/[。！？!?]$/.test(current) ? '。' : '') + part;
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+async function getVoicevoxTtsProvider(text) {
+  try {
+    const url = new URL('https://api.tts.quest/v3/voicevox/synthesis');
+    url.searchParams.set('speaker', '3');
+    url.searchParams.set('text', text);
+    const response = await fetch(url.toString(), { credentials: 'omit' });
+    if (!response.ok) throw new Error('VOICEVOX 请求失败 ' + response.status);
+    const data = await response.json();
+    const audioUrl = data?.mp3StreamingUrl || data?.mp3DownloadUrl || data?.wavDownloadUrl;
+    if (!data?.success || !audioUrl) throw new Error('VOICEVOX 未返回音频地址');
+    return {
+      name: data.speakerName ? `VOICEVOX ${data.speakerName}` : 'VOICEVOX 日语语音',
+      url: audioUrl,
+    };
+  } catch (e) {
+    console.warn('[study tts] voicevox failed:', e);
+    return null;
+  }
+}
+
+async function getJapaneseTtsProviders(text) {
+  const q = encodeURIComponent(text);
+  const providers = [
+    { name: '有道日语语音', url: `https://dict.youdao.com/dictvoice?audio=${q}&le=jap` },
+    { name: 'Google 日语语音', url: `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=ja&q=${q}` },
+  ];
+  const voicevox = await getVoicevoxTtsProvider(text);
+  if (voicevox) providers.unshift(voicevox);
+  return providers;
+}
+
+function playStudyAudio(url, runId) {
+  return new Promise((resolve, reject) => {
+    const audioEl = new Audio(url);
+    studySpeechAudio = audioEl;
+    audioEl.preload = 'auto';
+    audioEl.onended = () => resolve();
+    audioEl.onerror = () => reject(new Error('音频接口不可用'));
+    audioEl.onabort = () => reject(new Error('朗读已取消'));
+    audioEl.play().catch(reject);
+    if (runId !== studySpeechRunId) {
+      audioEl.pause();
+      reject(new Error('朗读已取消'));
+    }
+  });
+}
+
+async function speakJapaneseWithBrowser(text) {
+  const voice = await getJapaneseVoiceAsync();
+  if (!voice) throw new Error('没有可用的日语语音');
+  return new Promise((resolve, reject) => {
+    if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
+      reject(new Error('浏览器不支持朗读'));
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'ja-JP';
+    utterance.rate = 0.86;
+    utterance.pitch = 1;
+    utterance.voice = voice;
+    utterance.onstart = () => setStudyStatus(`日语朗读中：${voice.name}`);
+    utterance.onerror = () => reject(new Error('浏览器朗读失败'));
+    utterance.onend = () => resolve();
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  });
+}
+
+async function speakJapanese(text) {
+  const sourceText = String(text || '').trim();
+  if (!sourceText) return;
+  stopStudySpeech();
+  const runId = studySpeechRunId;
+  const chunks = buildJapaneseTtsChunks(sourceText);
+  let usedFallback = false;
+
+  for (let i = 0; i < chunks.length; i++) {
+    if (runId !== studySpeechRunId) return;
+    const chunk = chunks[i];
+    let played = false;
+    const providers = await getJapaneseTtsProviders(chunk);
+    for (const provider of providers) {
+      try {
+        setStudyStatus(`日语朗读中 ${i + 1}/${chunks.length}：${provider.name}`);
+        await playStudyAudio(provider.url, runId);
+        played = true;
+        break;
+      } catch (e) {
+        if (runId !== studySpeechRunId) return;
+      }
+    }
+    if (!played) {
+      usedFallback = true;
+      try {
+        await speakJapaneseWithBrowser(chunk);
+      } catch (e) {
+        setStudyStatus('朗读失败：免费语音接口不可用，且当前浏览器没有可用的日语语音。请在系统/浏览器语音设置中安装 Japanese / ja-JP 语音。', true);
+        return;
+      }
+    }
+  }
+
+  if (runId === studySpeechRunId) {
+    studySpeechAudio = null;
+    setStudyStatus(usedFallback ? '朗读完成 ✓ 已回退到浏览器语音' : '日语朗读完成 ✓');
+  }
+}
+
+function renderStudyPlaceholder(kind = 'empty') {
+  if (!studyResults) return;
+  const content = kind === 'cleared'
+    ? '<div class="hint-emoji">🧹</div><p><strong>已清空。</strong></p><p>输入新的日语句子后可以继续转换。</p>'
+    : '<div class="hint-emoji">📖</div><p><strong>日语学习模式</strong></p><p>输入句子后点击转换，会按阅读模式样式显示假名与罗马音。</p><p class="hint-sub">朗读会优先使用免费日语语音接口，不可用时回退到浏览器日语语音。</p>';
+  studyResults.innerHTML = `<div class="hint-card">${content}</div>`;
+}
+
+async function renderStudyLines(sentences) {
+  studyResults.innerHTML = '';
+  studyLines = [];
+  if (!sentences.length) {
+    renderStudyPlaceholder();
+    return;
+  }
+  setStudyStatus(`正在转换 ${sentences.length} 句...`);
+
+  for (let i = 0; i < sentences.length; i++) {
+    const text = sentences[i];
+    const line = document.createElement('div');
+    line.className = 'lrc-line study-line';
+    line.innerHTML = `
+      <button class="icon-btn study-speak-btn" type="button" aria-label="朗读这一句" title="朗读这一句">🔊</button>
+      <div class="jp">${escapeHTML(text)}</div>
+      <div class="romaji"></div>
+      <div class="zh"></div>
+    `;
+    line.querySelector('.study-speak-btn').addEventListener('click', () => speakJapanese(text));
+    studyResults.appendChild(line);
+    studyLines.push({ text, el: line });
+
+    try {
+      const { html, romaji } = await toFurigana(text);
+      line.querySelector('.jp').innerHTML = html || escapeHTML(text);
+      line.querySelector('.romaji').textContent = romaji || '';
+    } catch (e) {
+      line.querySelector('.romaji').textContent = kanaToRomajiSimple(kanaToHiragana(text));
+    }
+    if (i % 3 === 0) setStudyStatus(`转换中 ${i + 1}/${sentences.length}...`);
+  }
+  setStudyStatus(`转换完成 ✓ 共 ${sentences.length} 句`);
+}
+
+async function convertStudyInput() {
+  const sentences = splitJapaneseSentences(studyInput?.value || '');
+  if (!sentences.length) {
+    setStudyStatus('请先输入日语句子。', true);
+    studyInput?.focus();
+    return;
+  }
+  await renderStudyLines(sentences);
+}
+
+$('#btn-study-convert')?.addEventListener('click', convertStudyInput);
+$('#btn-study-clear')?.addEventListener('click', () => {
+  if (studyInput) studyInput.value = '';
+  studyLines = [];
+  stopStudySpeech();
+  renderStudyPlaceholder('cleared');
+  setStudyStatus('');
+});
+$('#btn-study-speak-all')?.addEventListener('click', () => {
+  const rawText = studyLines.length
+    ? studyLines.map(line => line.text).join('\n')
+    : (studyInput?.value || '').trim();
+  const text = splitJapaneseSentences(rawText).join('\n');
+  if (!text) {
+    setStudyStatus('请先输入或转换日语句子。', true);
+    return;
+  }
+  speakJapanese(text);
+});
+studyInput?.addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') convertStudyInput();
+});
+
 /* ---------------- Playback abstraction (audio + YouTube + Bilibili/timer) ---------------- */
 const player = {
   mode: 'audio', // 'audio' | 'yt' | 'timer'
@@ -736,6 +1039,7 @@ const player = {
     if (!this.timerRunning) updateTimerHud();
   }
 };
+applyAppMode(localStorage.getItem(APP_MODE_KEY) || 'lyrics');
 function seekTo(t) { player.seek(t); }
 
 /* Audio element timeupdate -> sync */

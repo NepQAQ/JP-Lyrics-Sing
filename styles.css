@@ -262,6 +262,36 @@ body.mode-read .mode-btn {
   border: 1px solid var(--chip-border);
   box-shadow: none;
 }
+.app-mode-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 40px; padding: 0 14px;
+  background: var(--chip-bg);
+  color: var(--text);
+  border: 1px solid var(--chip-border);
+  border-radius: 999px;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform .12s, background .2s, border-color .2s;
+}
+.app-mode-btn:hover { background: var(--hover); transform: translateY(-1px); }
+.app-mode-btn:active { transform: scale(0.96); }
+.app-mode-btn .app-mode-icon { font-size: 14px; }
+body.app-study .app-mode-btn {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #07091c;
+  border-color: transparent;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+body.app-study #panel,
+body.app-study #lyrics-view,
+body.app-study #player-bar,
+body.app-study #timer-hud {
+  display: none !important;
+}
+body.app-study {
+  overflow-y: auto;
+}
 
 /* ===== Panel ===== */
 .panel {
@@ -637,6 +667,85 @@ button.primary:hover { filter: brightness(1.08); }
 .hint-card .hint-sub { color: var(--muted); font-size: 13px; margin-top: 14px; }
 .hint-emoji { font-size: 44px; margin-bottom: 8px; }
 
+/* ===== Study view ===== */
+.study-view {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 16px 16px 40px;
+  overflow-y: auto;
+}
+.study-view[hidden] { display: none; }
+.study-panel {
+  padding: 16px;
+  border-radius: 18px;
+  box-shadow: var(--panel-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.study-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.study-title {
+  color: var(--text-strong);
+  font-size: 18px;
+  font-weight: 700;
+}
+.study-subtitle {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.study-actions { justify-content: flex-start; }
+.study-results {
+  padding: 12px 0 0;
+}
+.lrc-line.study-line {
+  position: relative;
+  padding-right: 58px;
+  opacity: 1;
+  filter: none;
+  text-align: left;
+  cursor: default;
+  transform: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 1px solid transparent;
+}
+.lrc-line.study-line:hover {
+  background: var(--hover) !important;
+}
+.lrc-line.study-line .jp,
+.lrc-line.study-line .romaji,
+.lrc-line.study-line .zh {
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
+  text-align: left;
+}
+.lrc-line.study-line .zh {
+  min-height: 0;
+}
+.study-speak-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
 .lrc-line {
   padding: 16px 18px;
   margin: 8px auto;
@@ -887,6 +996,11 @@ body.no-player .lyrics-view { padding-bottom: 32px; }
   .brand h1 { font-size: 15px; }
   .brand-sub { display: none; }
   .icon-btn { width: 38px; height: 38px; }
+  .header-actions { gap: 6px; }
+  .app-mode-btn,
+  .mode-btn { padding: 0 10px; }
+  .app-mode-btn .app-mode-text,
+  .mode-btn .mode-text { display: none; }
   .panel {
     margin: 8px;
     padding: 12px;
@@ -912,6 +1026,10 @@ body.no-player .lyrics-view { padding-bottom: 32px; }
     width: 100%;
     padding: 14px 12px;
   }
+  .study-view { padding: 10px 10px 28px; }
+  .study-panel { padding: 12px; }
+  .study-head { align-items: flex-start; }
+  .study-line { padding-right: 50px; }
   .tab { font-size: 12px; padding: 8px 4px; }
   .bili-result { grid-template-columns: 76px minmax(0, 1fr); }
   .bili-cover { width: 76px; }

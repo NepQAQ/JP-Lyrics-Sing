@@ -178,6 +178,18 @@
         <button id="btn-study-speak-all" class="primary" type="button">朗读全部</button>
       </div>
       <textarea id="study-input" rows="5" placeholder="例：今日はいい天気ですね。&#10;一緒に日本語を練習しましょう。"></textarea>
+      <label class="study-voice-row">
+        <span>朗读音色</span>
+        <select id="study-voice-select" class="study-voice-select">
+          <option value="cn-default">中国区优先（百度/有道，失败后自动兜底）</option>
+          <option value="voicevox-13">低沉男声（VOICEVOX 青山龍星）</option>
+          <option value="voicevox-11">男声（VOICEVOX 玄野武宏）</option>
+          <option value="voicevox-8">清亮女声（VOICEVOX 春日部つむぎ）</option>
+          <option value="voicevox-2">女声（VOICEVOX 四国めたん）</option>
+          <option value="voicevox-3">可爱声线（VOICEVOX ずんだもん）</option>
+          <option value="browser-ja">系统日语语音（ja-JP）</option>
+        </select>
+      </label>
       <div class="row study-actions">
         <button id="btn-study-convert" class="primary" type="button">转换</button>
         <button id="btn-study-clear" type="button">清空</button>
@@ -189,7 +201,7 @@
         <div class="hint-emoji">📖</div>
         <p><strong>日语学习模式</strong></p>
         <p>输入句子后点击转换，会按阅读模式样式显示假名与罗马音。</p>
-        <p class="hint-sub">朗读会优先使用免费日语语音接口，不可用时回退到浏览器日语语音。</p>
+        <p class="hint-sub">朗读可选择不同音色，默认优先尝试中国区可访问的免费语音接口。</p>
       </div>
     </div>
   </section>

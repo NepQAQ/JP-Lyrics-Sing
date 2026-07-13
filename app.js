@@ -1178,7 +1178,7 @@ function syncHighlight(t) {
   }
 }
 
-function centerActiveLyric(el, behavior = 'auto') {
+function centerActiveLyric(el, behavior = 'smooth') {
   lastAutoCenterAt = performance.now();
   const rect = el.getBoundingClientRect();
   const viewRect = lyricsView.getBoundingClientRect();
@@ -1188,11 +1188,7 @@ function centerActiveLyric(el, behavior = 'auto') {
     lyricsView.scrollHeight - lyricsView.clientHeight,
     lyricsView.scrollTop + offset
   ));
-  if (behavior === 'smooth') {
-    lyricsView.scrollTo({ top: nextTop, behavior });
-  } else {
-    lyricsView.scrollTop = nextTop;
-  }
+  lyricsView.scrollTo({ top: nextTop, behavior });
 }
 
 audio.addEventListener('play', () => {
@@ -1571,6 +1567,7 @@ async function loadFromLrclib(item) {
   startAssistActionsForLyric(item);
   setStatus(`${syncedLrc ? '已载入' : '已载入纯文本歌词'}：${item.trackName} - ${item.artistName}；正在后台搜索 Kanogoma 和 Bilibili...`);
   await loadLrcFromText(lrc);
+  setPanelCollapsed(true);
   if (!syncedLrc) switchToTimerMode();
   void Promise.allSettled([
     prefetchKanogomaCandidatesForLyric(item),

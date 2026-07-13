@@ -873,8 +873,8 @@ body.mode-read .lyrics-view {
 }
 .romaji {
   font-family: "Inter", sans-serif;
-  font-size: 13px; color: var(--accent);
-  margin-top: 6px;
+  font-size: 16px; color: var(--accent);
+  margin-top: 8px;
   letter-spacing: 0.6px;
   font-style: italic;
   opacity: 0.85;
@@ -1028,7 +1028,7 @@ body.no-player .lyrics-view { padding-bottom: 32px; }
 @media (min-width: 720px) {
   .panel { margin: 16px auto; max-width: 920px; }
   .jp { font-size: 30px; line-height: 2.1; }
-  .romaji { font-size: 15px; }
+  .romaji { font-size: 18px; }
   .zh { font-size: 16px; }
   .lyrics-view { padding-bottom: 240px; }
   .yt-wrap { max-width: 560px; }
@@ -1059,7 +1059,7 @@ body.no-player .lyrics-view { padding-bottom: 32px; }
     word-break: break-word;
   }
   .romaji {
-    font-size: clamp(12px, 3.4vw, 13px);
+    font-size: clamp(14px, 4vw, 16px);
     letter-spacing: 0.35px;
   }
   .zh { font-size: clamp(13px, 3.8vw, 14px); }

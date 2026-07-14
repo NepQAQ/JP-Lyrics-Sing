@@ -614,6 +614,12 @@ function parseLRC(text) {
     for (const t of stamps) out.push({ time: t, text: content });
   }
   out.sort((a, b) => a.time - b.time);
+  // 避免相同时间戳导致多行同时高亮：给重复时间戳加微小偏移
+  for (let i = 1; i < out.length; i++) {
+    if (out[i].time <= out[i - 1].time) {
+      out[i].time = out[i - 1].time + 0.05;
+    }
+  }
   return out;
 }
 
@@ -1135,49 +1141,95 @@ function getLyricFocusRatio() {
   return 0.38;
 }
 
-/* ---------------- KTV karaoke progress ---------------- */
+/* ---------------- KTV karaoke progress (char-level spans) ---------------- */
 let karaokeRafId = null;
+
+function buildKaraokeSpans(el, text, parentEl) {
+  if (el._karaokeText === text && el._karaokeBuilt) return;
+  // 备份原始 HTML（用于恢复 furigana）
+  if (parentEl && !parentEl._jpHTMLBackup) {
+    parentEl._jpHTMLBackup = el.innerHTML;
+  }
+  el._karaokeText = text;
+  el._karaokeBuilt = true;
+  // 将文本按字符包裹 span，便于逐字变色
+  let html = '';
+  for (let i = 0; i < text.length; i++) {
+    html += `<span class="karaoke-char" data-i="${i}">${escapeHTML(text[i])}</span>`;
+  }
+  el.innerHTML = html;
+  el._karaokeCharCount = text.length;
+}
 
 function updateKaraokeProgress(t) {
   if (activeIdx < 0 || !lrcLines[activeIdx]) return;
   const line = lrcLines[activeIdx];
   const jpEl = line.el.querySelector('.jp');
+  const romajiEl = line.el.querySelector('.romaji');
   if (!jpEl) return;
 
-  let progress;
+  // 确保 span 已构建
+  const plainText = line.text || '';
+  if (plainText && jpEl._karaokeText !== plainText) {
+    buildKaraokeSpans(jpEl, plainText, line.el);
+  }
+  // 罗马音也需要 span
+  const romajiText = line.romaji || romajiEl?.textContent || '';
+  if (romajiEl && romajiText && romajiEl._karaokeText !== romajiText) {
+    buildKaraokeSpans(romajiEl, romajiText);
+  }
+
+  let sungChars;
   if (line.wordTiming && line.wordTiming.length > 0) {
-    // PetitLyrics 逐字时间轴：按字符进度精确计算
+    // PetitLyrics 逐字时间轴
     if (!line._plLogged) { line._plLogged = true; console.log('[KTV] 逐字模式:', line.text, '|', line.wordTiming.length, '字'); }
     const tMs = t * 1000;
     const totalChars = line.wordTiming.reduce((sum, w) => sum + w.text.length, 0);
-    if (totalChars === 0) { progress = 0; }
+    if (totalChars === 0) { sungChars = 0; }
     else {
-      let completedChars = 0;
+      let completed = 0;
       for (const word of line.wordTiming) {
         if (tMs >= word.endtime) {
-          completedChars += word.text.length;
+          completed += word.text.length;
         } else if (tMs >= word.starttime) {
           const wordDur = word.endtime - word.starttime;
           const wordProg = wordDur > 0 ? (tMs - word.starttime) / wordDur : 1;
-          completedChars += word.text.length * wordProg;
+          completed += word.text.length * wordProg;
           break;
         } else {
           break;
         }
       }
-      progress = totalChars > 0 ? completedChars / totalChars : 0;
+      sungChars = completed;
     }
   } else {
-    // 线性估算（无逐字数据时）
+    // 线性估算
     const lineStart = line.time;
     const lineEnd = activeIdx < lrcLines.length - 1
       ? lrcLines[activeIdx + 1].time
       : lineStart + 5;
     const duration = Math.max(0.1, lineEnd - lineStart);
-    progress = Math.min(1, Math.max(0, (t - lineStart) / duration));
+    const progress = Math.min(1, Math.max(0, (t - lineStart) / duration));
+    sungChars = progress * (jpEl._karaokeCharCount || plainText.length);
   }
 
-  jpEl.style.setProperty('--karaoke-progress', (Math.min(1, Math.max(0, progress)) * 100).toFixed(2) + '%');
+  // 逐字符标记已唱/未唱
+  const jpSungInt = Math.floor(sungChars);
+  const jpChars = jpEl.querySelectorAll('.karaoke-char');
+  jpChars.forEach((ch, i) => {
+    if (i < jpSungInt) ch.classList.add('karaoke-sung');
+    else ch.classList.remove('karaoke-sung');
+  });
+
+  // 罗马音同步
+  if (romajiEl && romajiEl._karaokeCharCount) {
+    const romajiSungInt = Math.floor((sungChars / (jpEl._karaokeCharCount || 1)) * romajiEl._karaokeCharCount);
+    const romajiChars = romajiEl.querySelectorAll('.karaoke-char');
+    romajiChars.forEach((ch, i) => {
+      if (i < romajiSungInt) ch.classList.add('karaoke-sung');
+      else ch.classList.remove('karaoke-sung');
+    });
+  }
 }
 
 function startKaraokeLoop() {
@@ -1195,8 +1247,21 @@ function stopKaraokeLoop() {
 }
 
 function clearKaraokeProgress(el) {
+  // 恢复原始 HTML（furigana/romaji），移除 karaoke span
   const jp = el?.querySelector('.jp');
-  if (jp) jp.style.removeProperty('--karaoke-progress');
+  if (jp && jp._karaokeText !== undefined) {
+    jp.innerHTML = el._jpHTMLBackup || jp._karaokeText;
+    jp._karaokeText = undefined;
+    jp._karaokeBuilt = false;
+    jp._karaokeCharCount = 0;
+  }
+  const romaji = el?.querySelector('.romaji');
+  if (romaji && romaji._karaokeText !== undefined) {
+    romaji.textContent = romaji._karaokeText;
+    romaji._karaokeText = undefined;
+    romaji._karaokeBuilt = false;
+    romaji._karaokeCharCount = 0;
+  }
 }
 
 function syncHighlight(t) {
@@ -1470,6 +1535,8 @@ function matchPetitLyricsToLrc(plLines, lrcArr) {
   for (const lrcLine of lrcArr) {
     const normLrc = normalizeLyricsText(lrcLine.text || '');
     if (!normLrc) continue;
+
+    // 1. 尝试精确匹配单个 PL 行
     let bestMatch = null;
     let bestScore = 0;
     for (const pl of plLines) {
@@ -1485,6 +1552,22 @@ function matchPetitLyricsToLrc(plLines, lrcArr) {
     }
     if (bestMatch && bestScore >= 0.6) {
       lrcLine.wordTiming = bestMatch.words;
+      continue;
+    }
+
+    // 2. 一个 LRC 行可能包含多个 PL 行的文本（多行合并），尝试合并匹配
+    const contained = plLines.filter(pl => {
+      const normPl = normalizeLyricsText(pl.text || '');
+      return normPl && normPl.length >= 2 && normLrc.includes(normPl);
+    });
+    if (contained.length >= 2) {
+      contained.sort((a, b) => (a.words[0]?.starttime || 0) - (b.words[0]?.starttime || 0));
+      const mergedWords = contained.flatMap(pl => pl.words);
+      const mergedNorm = normalizeLyricsText(contained.map(pl => pl.text).join(''));
+      const coverage = normLrc.length > 0 ? mergedNorm.length / normLrc.length : 0;
+      if (coverage >= 0.6) {
+        lrcLine.wordTiming = mergedWords;
+      }
     }
   }
 }

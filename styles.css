@@ -751,23 +751,22 @@ button.primary:hover { filter: brightness(1.08); }
 
 /* KTV karaoke effect: text gradually turns gold left-to-right (sing mode only) */
 body:not(.mode-read) .lrc-line.active .jp {
-  width: fit-content;
-  margin-left: auto;
-  margin-right: auto;
-  background: linear-gradient(to right,
-    var(--active) 0%,
-    var(--active) var(--karaoke-progress, 0%),
-    var(--text-strong) var(--karaoke-progress, 0%),
-    var(--text-strong) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-  filter: drop-shadow(0 2px 14px color-mix(in srgb, var(--active) 35%, transparent));
+  color: var(--text-strong);
+}
+body:not(.mode-read) .lrc-line.active .jp .karaoke-sung {
+  color: var(--active);
+  text-shadow: 0 2px 18px color-mix(in srgb, var(--active) 40%, transparent);
 }
 body:not(.mode-read) .lrc-line.active .jp rt {
-  -webkit-text-fill-color: var(--accent);
   color: var(--accent);
+}
+
+/* KTV karaoke effect for romaji */
+body:not(.mode-read) .lrc-line.active .romaji {
+  color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+body:not(.mode-read) .lrc-line.active .romaji .karaoke-sung {
+  color: var(--active);
 }
 
 /* Reading mode: all lines fully readable, current line subtly marked */

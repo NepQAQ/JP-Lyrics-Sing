@@ -69,21 +69,6 @@
     </div>
   </aside>
 
-  <aside id="bili-search-popover" class="bili-search-popover glass" hidden>
-    <div class="popover-head">
-      <div>
-        <div class="popover-title">选择 Bilibili 音源</div>
-        <div id="bili-search-subtitle" class="popover-subtitle">先选歌词，再选视频</div>
-      </div>
-      <button id="btn-close-bili-search" class="icon-btn popover-close" aria-label="关闭 B站搜索" title="关闭">×</button>
-    </div>
-    <p class="hint-sm">已载入歌词。下面是为这首歌检索到的 B 站候选视频，点一下就会自动填入 BV 并载入播放器。</p>
-    <div id="bili-search-results" class="search-results bili-search-results"></div>
-    <div class="row">
-      <button id="btn-skip-bili-search">暂不选择</button>
-    </div>
-  </aside>
-
   <section id="panel" class="panel glass">
     <div class="row search-row">
       <div class="search-box">
@@ -96,37 +81,27 @@
     <div id="assist-actions" class="assist-actions glass" hidden>
       <div class="assist-actions-head">
         <div class="assist-actions-title">补充来源</div>
-        <div id="assist-actions-meta" class="assist-actions-meta">选择歌词后，将自动搜索 Kanogoma 和 Bilibili。</div>
+        <div id="assist-actions-meta" class="assist-actions-meta">选择歌词后，将自动搜索 Kanogoma。</div>
       </div>
       <div class="assist-actions-buttons">
         <button id="btn-apply-kanogoma" class="assist-btn" type="button" disabled>Kanogoma 待命</button>
-        <button id="btn-open-bili-candidates" class="assist-btn" type="button" disabled>Bilibili 待命</button>
       </div>
     </div>
 
     <div class="section-label">音频来源</div>
     <div class="source-tabs" role="tablist">
       <button class="tab active" data-tab="timer" role="tab">⏱ 计时</button>
-      <button class="tab" data-tab="bilibili" role="tab">📺 Bilibili</button>
       <button class="tab" data-tab="local" role="tab">📁 本地</button>
     </div>
 
     <div class="tab-pane active" data-pane="timer">
-      <p class="hint-sm" style="margin-bottom:8px">用于无法读取播放进度的场景（如 B 站、外部播放器、唱 K）。在歌曲第 0 秒按 ▶ 开始即可。</p>
+      <p class="hint-sm" style="margin-bottom:8px">用于无法读取播放进度的场景（如外部播放器、唱 K）。在歌曲第 0 秒按 ▶ 开始即可。</p>
       <div class="row">
         <button id="btn-timer-start" class="primary">▶ 开始 / 暂停</button>
         <button id="btn-timer-reset">⟲ 归零</button>
         <button id="btn-timer-back">« -0.5s</button>
         <button id="btn-timer-fwd">+0.5s »</button>
       </div>
-    </div>
-
-    <div class="tab-pane" data-pane="bilibili">
-      <div class="row">
-        <input id="bili-url" type="text" placeholder="粘贴 B 站链接（例：https://www.bilibili.com/video/BV1GJ411x7h7）" />
-        <button id="btn-load-bili" class="primary">载入</button>
-      </div>
-      <p class="hint-sm">B 站官方播放器不开放进度 API，将自动启用「计时模式」：在 B 站点播放的同时点 ▶ 开始即可，可用 ± 微调。</p>
     </div>
 
     <div class="tab-pane" data-pane="local">
@@ -210,7 +185,7 @@
     <div class="hint-card">
       <div class="hint-emoji">🎵</div>
       <p><strong>欢迎！</strong></p>
-      <p>顶部搜索歌词 · 选择音频来源（本地文件 / Bilibili / 计时）· 点播放即可跟唱</p>
+      <p>顶部搜索歌词 · 选择音频来源（本地文件 / 计时）· 点播放即可跟唱</p>
       <p class="hint-sub">右上角 🎤 切换 <b>跟唱模式</b>（高亮当前句）与 <b>阅读模式</b>（清晰平铺全文）。</p>
     </div>
   </main>
@@ -224,15 +199,6 @@
   </div>
 
   <footer class="player-bar glass" id="player-bar">
-    <div id="bili-wrap" class="yt-wrap bili-wrap" hidden>
-      <div class="bili-player-head">
-        <span>Bilibili 音源</span>
-        <button id="btn-toggle-bili-player" class="btn-mini" type="button" aria-expanded="true">收起</button>
-      </div>
-      <div class="bili-frame-box">
-        <iframe id="bili-iframe" src="" allowfullscreen allow="autoplay; fullscreen" scrolling="no" frameborder="0"></iframe>
-      </div>
-    </div>
     <audio id="audio" preload="metadata" controls playsinline></audio>
   </footer>
 

@@ -206,27 +206,6 @@ body {
   animation: panelIn .25s ease;
 }
 .overrides-popover[hidden] { display: none; }
-.bili-search-popover {
-  position: fixed;
-  inset: calc(var(--app-header-height) + 18px) 12px auto;
-  z-index: 28;
-  width: min(760px, calc(100vw - 24px));
-  margin: 0 auto;
-  padding: 14px;
-  border-radius: 18px;
-  box-shadow: var(--panel-shadow);
-  animation: panelIn .25s ease;
-}
-.bili-search-popover[hidden] { display: none; }
-.bili-search-results {
-  max-height: min(52vh, 420px);
-  margin: 10px 0 12px;
-}
-.bili-search-results .bili-section {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: none;
-}
 .popover-head {
   display: flex;
   align-items: center;
@@ -517,47 +496,15 @@ button.primary:hover { filter: brightness(1.08); }
 .btn-mini.loading { opacity: 0.6; pointer-events: none; }
 
 /* Source subsections inside the search results panel */
-.source-section,
-.bili-section {
+.source-section {
   margin-top: 6px; padding: 8px 6px 4px;
   border-top: 1px dashed var(--input-border);
 }
-.source-section .source-section-head,
-.bili-section .source-section-head {
+.source-section .source-section-head {
   display: flex; align-items: center; gap: 8px;
   font-size: 11px; font-weight: 600; letter-spacing: 1.2px;
   color: var(--muted-2); text-transform: uppercase;
   padding: 0 6px 6px;
-}
-
-.bili-result {
-  display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-}
-.bili-cover {
-  width: 92px;
-  aspect-ratio: 16 / 10;
-  object-fit: cover;
-  border-radius: 8px;
-  background: var(--chip-bg);
-}
-.bili-cover-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0;
-}
-.bili-info { min-width: 0; }
-.bili-info .title {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ===== File label ===== */
@@ -802,6 +749,27 @@ button.primary:hover { filter: brightness(1.08); }
   text-shadow: 0 2px 18px color-mix(in srgb, var(--active) 40%, transparent);
 }
 
+/* KTV karaoke effect: text gradually turns gold left-to-right (sing mode only) */
+body:not(.mode-read) .lrc-line.active .jp {
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+  background: linear-gradient(to right,
+    var(--active) 0%,
+    var(--active) var(--karaoke-progress, 0%),
+    var(--text-strong) var(--karaoke-progress, 0%),
+    var(--text-strong) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 2px 14px color-mix(in srgb, var(--active) 35%, transparent));
+}
+body:not(.mode-read) .lrc-line.active .jp rt {
+  -webkit-text-fill-color: var(--accent);
+  color: var(--accent);
+}
+
 /* Reading mode: all lines fully readable, current line subtly marked */
 body.mode-read .lrc-line {
   opacity: 1;
@@ -942,47 +910,6 @@ body.no-player .lyrics-view { padding-bottom: 32px; }
   overflow: hidden;
   box-shadow: 0 8px 24px rgba(0,0,0,0.4);
 }
-.yt-wrap:not(.bili-wrap) iframe,
-.yt-wrap:not(.bili-wrap) > div {
-  position: absolute; inset: 0; width: 100%; height: 100%; border: 0;
-}
-
-.bili-wrap {
-  aspect-ratio: auto;
-  max-width: 640px;
-  padding: 8px;
-  background: var(--input-bg);
-  border: 1px solid var(--input-border);
-}
-.bili-player-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 8px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.bili-frame-box {
-  position: relative;
-  aspect-ratio: 16 / 9;
-  border-radius: 10px;
-  overflow: hidden;
-}
-.bili-frame-box iframe {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
-}
-.bili-wrap.bili-collapsed {
-  max-width: 360px;
-  padding: 6px 8px;
-  margin-bottom: 0;
-}
-.bili-wrap.bili-collapsed .bili-player-head { margin-bottom: 0; }
-.bili-wrap.bili-collapsed .bili-frame-box { display: none; }
 
 /* ===== Timer HUD ===== */
 .timer-hud {
@@ -1080,8 +1007,6 @@ body.no-player .lyrics-view { padding-bottom: 32px; }
   .study-voice-row { grid-template-columns: 1fr; gap: 6px; }
   .study-line { padding-right: 50px; }
   .tab { font-size: 12px; padding: 8px 4px; }
-  .bili-result { grid-template-columns: 76px minmax(0, 1fr); }
-  .bili-cover { width: 76px; }
 }
 
 /* ===== Scrollbar ===== */

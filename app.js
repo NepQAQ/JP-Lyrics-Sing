@@ -14,12 +14,8 @@ const statusEl = $('#status');
 const searchInput = $('#search-input');
 const searchResults = $('#search-results');
 const assistActions = $('#assist-actions');
-const biliWrap = $('#bili-wrap');
 let searchRequestId = 0;
-let biliSearchRequestId = 0;
 let kanogomaSearchRequestId = 0;
-let latestBiliCandidates = [];
-let latestBiliQuery = '';
 let latestKanogomaCandidates = [];
 let latestKanogomaQuery = '';
 
@@ -32,7 +28,6 @@ const assistSearchState = {
   title: '',
   artist: '',
   kanogoma: { status: 'idle', message: '', count: 0 },
-  bili: { status: 'idle', message: '', count: 0 },
 };
 
 /* ---------------- Theme ---------------- */
@@ -132,16 +127,12 @@ function setStudyStatus(msg, isError = false) {
 }
 
 function resetAssistActions() {
-  biliSearchRequestId++;
   kanogomaSearchRequestId++;
-  latestBiliCandidates = [];
-  latestBiliQuery = '';
   latestKanogomaCandidates = [];
   latestKanogomaQuery = '';
   assistSearchState.title = '';
   assistSearchState.artist = '';
   assistSearchState.kanogoma = { status: 'idle', message: '', count: 0 };
-  assistSearchState.bili = { status: 'idle', message: '', count: 0 };
   renderAssistActions();
 }
 
@@ -149,7 +140,6 @@ function startAssistActionsForLyric(item) {
   assistSearchState.title = item?.trackName || '';
   assistSearchState.artist = item?.artistName || '';
   assistSearchState.kanogoma = { status: 'loading', message: '', count: 0 };
-  assistSearchState.bili = { status: 'loading', message: '', count: 0 };
   renderAssistActions();
 }
 
@@ -173,18 +163,16 @@ function renderAssistActions() {
   if (!assistActions) return;
   const meta = $('#assist-actions-meta');
   const kanogomaBtn = $('#btn-apply-kanogoma');
-  const biliBtn = $('#btn-open-bili-candidates');
   const hasContext = !!(
     assistSearchState.title
     || assistSearchState.artist
     || assistSearchState.kanogoma.status !== 'idle'
-    || assistSearchState.bili.status !== 'idle'
   );
   assistActions.hidden = !hasContext;
-  if (!hasContext || !meta || !kanogomaBtn || !biliBtn) return;
+  if (!hasContext || !meta || !kanogomaBtn) return;
 
   const label = [assistSearchState.title, assistSearchState.artist].filter(Boolean).join(' · ') || '当前歌词';
-  meta.textContent = `${label} · Kanogoma${formatAssistState(assistSearchState.kanogoma)} · Bilibili${formatAssistState(assistSearchState.bili)}`;
+  meta.textContent = `${label} · Kanogoma${formatAssistState(assistSearchState.kanogoma)}`;
 
   applyAssistButtonState(kanogomaBtn, assistSearchState.kanogoma, {
     idle: 'Kanogoma 待命',
@@ -196,15 +184,6 @@ function renderAssistActions() {
   kanogomaBtn.title = latestKanogomaCandidates[0]
     ? `将优先应用：${latestKanogomaCandidates[0].title}${latestKanogomaCandidates[0].artist ? ` - ${latestKanogomaCandidates[0].artist}` : ''}`
     : '';
-
-  applyAssistButtonState(biliBtn, assistSearchState.bili, {
-    idle: 'Bilibili 待命',
-    loading: 'Bilibili 搜索中...',
-    ready: assistSearchState.bili.count > 1 ? `选择 Bilibili 音源 (${assistSearchState.bili.count})` : '选择 Bilibili 音源',
-    empty: 'Bilibili 未找到',
-    error: 'Bilibili 暂不可用',
-  });
-  biliBtn.title = assistSearchState.bili.status === 'ready' ? '打开候选视频列表' : '';
 }
 
 function setPanelCollapsed(collapsed) {
@@ -659,6 +638,7 @@ async function renderLyrics(parsed) {
   lyricsView.innerHTML = '';
   lrcLines = [];
   activeIdx = -1;
+  stopKaraokeLoop();
   if (!parsed.length) {
     lyricsView.innerHTML = '<div class="hint-card"><p>未解析到歌词。</p></div>';
     return;
@@ -1066,7 +1046,7 @@ studyInput?.addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') convertStudyInput();
 });
 
-/* ---------------- Playback abstraction (audio + YouTube + Bilibili/timer) ---------------- */
+/* ---------------- Playback abstraction (audio + timer) ---------------- */
 const player = {
   mode: 'audio', // 'audio' | 'yt' | 'timer'
   yt: null,
@@ -1155,6 +1135,70 @@ function getLyricFocusRatio() {
   return 0.38;
 }
 
+/* ---------------- KTV karaoke progress ---------------- */
+let karaokeRafId = null;
+
+function updateKaraokeProgress(t) {
+  if (activeIdx < 0 || !lrcLines[activeIdx]) return;
+  const line = lrcLines[activeIdx];
+  const jpEl = line.el.querySelector('.jp');
+  if (!jpEl) return;
+
+  let progress;
+  if (line.wordTiming && line.wordTiming.length > 0) {
+    // PetitLyrics 逐字时间轴：按字符进度精确计算
+    if (!line._plLogged) { line._plLogged = true; console.log('[KTV] 逐字模式:', line.text, '|', line.wordTiming.length, '字'); }
+    const tMs = t * 1000;
+    const totalChars = line.wordTiming.reduce((sum, w) => sum + w.text.length, 0);
+    if (totalChars === 0) { progress = 0; }
+    else {
+      let completedChars = 0;
+      for (const word of line.wordTiming) {
+        if (tMs >= word.endtime) {
+          completedChars += word.text.length;
+        } else if (tMs >= word.starttime) {
+          const wordDur = word.endtime - word.starttime;
+          const wordProg = wordDur > 0 ? (tMs - word.starttime) / wordDur : 1;
+          completedChars += word.text.length * wordProg;
+          break;
+        } else {
+          break;
+        }
+      }
+      progress = totalChars > 0 ? completedChars / totalChars : 0;
+    }
+  } else {
+    // 线性估算（无逐字数据时）
+    const lineStart = line.time;
+    const lineEnd = activeIdx < lrcLines.length - 1
+      ? lrcLines[activeIdx + 1].time
+      : lineStart + 5;
+    const duration = Math.max(0.1, lineEnd - lineStart);
+    progress = Math.min(1, Math.max(0, (t - lineStart) / duration));
+  }
+
+  jpEl.style.setProperty('--karaoke-progress', (Math.min(1, Math.max(0, progress)) * 100).toFixed(2) + '%');
+}
+
+function startKaraokeLoop() {
+  stopKaraokeLoop();
+  function tick() {
+    if (!isPlaybackActive()) { stopKaraokeLoop(); return; }
+    updateKaraokeProgress(player.getTime());
+    karaokeRafId = requestAnimationFrame(tick);
+  }
+  karaokeRafId = requestAnimationFrame(tick);
+}
+
+function stopKaraokeLoop() {
+  if (karaokeRafId) { cancelAnimationFrame(karaokeRafId); karaokeRafId = null; }
+}
+
+function clearKaraokeProgress(el) {
+  const jp = el?.querySelector('.jp');
+  if (jp) jp.style.removeProperty('--karaoke-progress');
+}
+
 function syncHighlight(t) {
   if (!lrcLines.length) return;
   let idx = -1;
@@ -1165,17 +1209,23 @@ function syncHighlight(t) {
     else hi = mid - 1;
   }
   if (idx !== activeIdx) {
-    if (activeIdx >= 0) lrcLines[activeIdx].el.classList.remove('active');
+    if (activeIdx >= 0) {
+      lrcLines[activeIdx].el.classList.remove('active');
+      clearKaraokeProgress(lrcLines[activeIdx].el);
+    }
     activeIdx = idx;
     if (idx >= 0) {
       const el = lrcLines[idx].el;
       el.classList.add('active');
       if (shouldCenterLyrics()) centerActiveLyric(el);
+      updateKaraokeProgress(t);
     }
   } else if (idx >= 0 && shouldCenterLyrics()) {
     const now = performance.now();
     if (now - lastAutoCenterAt > 650) centerActiveLyric(lrcLines[idx].el);
   }
+  if (isPlaybackActive() && !karaokeRafId) startKaraokeLoop();
+  else if (!isPlaybackActive() && karaokeRafId) stopKaraokeLoop();
 }
 
 function centerActiveLyric(el, behavior = 'smooth') {
@@ -1229,6 +1279,7 @@ $('#btn-clear').addEventListener('click', () => {
   $('#lrc-file-name').textContent = '未选择 .lrc 文件';
   lyricsView.innerHTML = '<div class="hint-card"><div class="hint-emoji">🧹</div><p>已清空。</p></div>';
   lrcLines = []; activeIdx = -1;
+  stopKaraokeLoop();
   resetAssistActions();
   setStatus('');
 });
@@ -1305,236 +1356,10 @@ async function doSearch() {
   setStatus(lrcList.length ? `找到 ${lrcList.length} 条歌词` : '未找到歌词');
 }
 
-function setBiliSearchPopoverOpen(open) {
-  const popover = $('#bili-search-popover');
-  if (!popover) return;
-  popover.hidden = !open;
-}
-
-function openLatestBiliCandidates() {
-  if (!latestBiliCandidates.length) {
-    setStatus('当前还没有可展示的 B 站候选视频', true);
-    return;
-  }
-  const subtitle = $('#bili-search-subtitle');
-  if (subtitle) subtitle.textContent = latestBiliQuery || '为当前歌词选择 B 站音源';
-  renderBiliSearchResults(latestBiliCandidates, latestBiliQuery || '当前歌词');
-  setBiliSearchPopoverOpen(true);
-}
-
-function renderBiliSearchResults(items, query) {
-  const list = $('#bili-search-results');
-  if (!list) return;
-  list.innerHTML = '';
-  if (Array.isArray(items) && items.length) {
-    const sec = document.createElement('div');
-    sec.className = 'bili-section';
-    sec.innerHTML = `<div class="source-section-head">📺 ${escapeHTML(query)} 的 Bilibili 候选视频</div>`;
-    items.slice(0, 12).forEach(it => {
-      const div = document.createElement('div');
-      div.className = 'result-item bili-result';
-      div.innerHTML = `
-        ${it.cover ? `<img class="bili-cover" src="${escapeHTML(it.cover)}" alt="" loading="lazy" />` : '<div class="bili-cover bili-cover-empty">BV</div>'}
-        <div class="bili-info">
-          <div class="title">${escapeHTML(it.title)} <span class="badge">BV</span></div>
-          <div class="meta">${escapeHTML([it.author, it.duration, it.bvid].filter(Boolean).join(' · '))}</div>
-        </div>
-      `;
-      div.addEventListener('click', () => {
-        selectBilibiliSearchResult(it);
-        setBiliSearchPopoverOpen(false);
-      });
-      sec.appendChild(div);
-    });
-    list.appendChild(sec);
-    return;
-  }
-  const empty = document.createElement('div');
-  empty.style.padding = '12px';
-  empty.style.color = 'var(--muted)';
-  empty.textContent = '没有找到可用的 B 站视频结果。';
-  list.appendChild(empty);
-}
-
-async function openBilibiliSearchPopoverForLyric(item) {
-  return prefetchBilibiliCandidatesForLyric(item, { openPopover: true });
-}
-
-async function prefetchBilibiliCandidatesForLyric(item, options = {}) {
-  const list = $('#bili-search-results');
-  const subtitle = $('#bili-search-subtitle');
-  if (!list || !subtitle) return;
-  const query = `${item.trackName || ''} ${item.artistName || ''}`.trim() || item.trackName || item.artistName || '';
-  const requestId = ++biliSearchRequestId;
-  latestBiliCandidates = [];
-  latestBiliQuery = query;
-  assistSearchState.bili = { status: 'loading', message: '', count: 0 };
-  renderAssistActions();
-  if (options.openPopover) {
-    subtitle.textContent = query || '为当前歌词选择 B 站音源';
-    setBiliSearchPopoverOpen(true);
-    list.innerHTML = '<div style="padding:12px;color:var(--muted)">正在搜索 Bilibili 视频...</div>';
-  }
-  const items = await searchBilibiliVideos(query);
-  if (requestId !== biliSearchRequestId) return;
-  if (Array.isArray(items) && items.length) {
-    latestBiliCandidates = items.slice(0, 12);
-    latestBiliQuery = query;
-    assistSearchState.bili = { status: 'ready', message: '', count: latestBiliCandidates.length };
-    renderAssistActions();
-    if (options.openPopover) renderBiliSearchResults(items, query);
-  } else {
-    latestBiliCandidates = [];
-    latestBiliQuery = query;
-    assistSearchState.bili = {
-      status: items?.__error ? 'error' : 'empty',
-      message: items?.__error || '',
-      count: 0,
-    };
-    renderAssistActions();
-    if (options.openPopover) {
-      list.innerHTML = `<div style="padding:12px;color:var(--muted)">Bilibili 搜索暂不可用${items?.__error ? `：${escapeHTML(items.__error)}` : ''}</div>`;
-    }
-  }
-}
-
-function selectBilibiliSearchResult(item) {
-  const bvid = parseBilibiliId(item?.bvid || '');
-  if (!bvid) {
-    setStatus('选中的 B 站结果没有可用 BV 号', true);
-    return;
-  }
-  $('#bili-url').value = bvid;
-  activateSourceTab('bilibili');
-  switchToBilibiliMode(bvid);
-  searchResults.hidden = true;
-  setStatus(`已选择 B 站视频：${item?.title || bvid} · ${bvid}`);
-}
-
-async function searchBilibiliVideos(query) {
-  let lastError = null;
-  try {
-    const url = `https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=${encodeURIComponent(query)}`;
-    const apiItems = await fetchBilibiliApiItems(url);
-    if (apiItems.length) return apiItems;
-  } catch (e) {
-    console.warn('[bilibili]', e);
-    lastError = e;
-  }
-  try {
-    const htmlItems = await searchBilibiliViaAllOrigins(query);
-    if (htmlItems.length) return htmlItems;
-  } catch (e) {
-    console.warn('[bilibili html]', e);
-    lastError = e;
-  }
-  try {
-    const fallback = await searchBilibiliViaReader(query);
-    if (fallback.length) return fallback;
-  } catch (e) {
-    console.warn('[bilibili reader]', e);
-    lastError = e;
-  }
-  return { __error: lastError?.message || '没有返回视频结果' };
-}
-
-async function fetchBilibiliApiItems(url) {
-  const r = await fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer' });
-  if (!r.ok) throw new Error('网络错误 ' + r.status);
-  const data = await r.json();
-  const list = Array.isArray(data?.data?.result) ? data.data.result : [];
-  return list
-    .filter(item => item.bvid)
-    .map(item => ({
-      bvid: item.bvid,
-      title: stripHTML(item.title || item.bvid),
-      author: stripHTML(item.author || ''),
-      duration: item.duration || '',
-      cover: normalizeBiliCover(item.pic || ''),
-    }));
-}
-
-async function searchBilibiliViaReader(query) {
-  const searchUrl = `https://search.bilibili.com/all?keyword=${encodeURIComponent(query)}`;
-  const r = await fetch('https://r.jina.ai/' + searchUrl, {
-    headers: { 'Accept': 'text/plain' }
-  });
-  if (!r.ok) throw new Error('网页读取失败 ' + r.status);
-  const text = await r.text();
-  return parseBilibiliReaderResults(text);
-}
-
-async function searchBilibiliViaAllOrigins(query) {
-  const searchUrl = `https://search.bilibili.com/all?keyword=${encodeURIComponent(query)}`;
-  const r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(searchUrl));
-  if (!r.ok) throw new Error('网页代理失败 ' + r.status);
-  const html = await r.text();
-  return parseBilibiliHtmlResults(html);
-}
-
-function parseBilibiliHtmlResults(html) {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const out = [];
-  const seen = new Set();
-  doc.querySelectorAll('a[href*="/video/BV"]').forEach(a => {
-    const href = a.getAttribute('href') || '';
-    const bv = href.match(/BV[\w]{10}/)?.[0];
-    if (!bv || seen.has(bv)) return;
-    const card = a.closest('li, .video-list-item, .bili-video-card, .video-item') || a.parentElement;
-    const img = card?.querySelector('img') || a.querySelector('img');
-    const title = stripHTML(a.getAttribute('title') || a.textContent || bv).replace(/\s+/g, ' ').trim();
-    let author = '';
-    const authorEl = card?.querySelector('a[href*="space.bilibili.com"], .up-name, .bili-video-card__info--author');
-    if (authorEl) author = stripHTML(authorEl.textContent || '').replace(/\s+/g, ' ').trim();
-    let cover = img?.getAttribute('src') || img?.getAttribute('data-src') || '';
-    if (!cover) {
-      const raw = card?.innerHTML || '';
-      cover = raw.match(/https?:\\?\/\\?\/[^"'<>]+?\.(?:jpg|jpeg|png|webp)[^"'<>]*/i)?.[0] || '';
-    }
-    seen.add(bv);
-    out.push({ bvid: bv, title: title || bv, author, duration: '', cover: normalizeBiliCover(cover.replace(/\\\//g, '/')) });
-  });
-  return out.slice(0, 12);
-}
-
-function parseBilibiliReaderResults(text) {
-  const out = [];
-  const seen = new Set();
-  const lines = text.split(/\r?\n/);
-  let recentCover = '';
-  const imageRe = /!\[[^\]]*\]\(([^)]+(?:hdslb|bili)[^)]*)\)/i;
-  const videoRe = /\[([^\]\n]{2,120})\]\((https?:\/\/www\.bilibili\.com\/video\/(BV[\w]{10})[^)]*)\)/i;
-  for (const line of lines) {
-    const img = line.match(imageRe);
-    if (img) recentCover = normalizeBiliCover(img[1]);
-    const video = line.match(videoRe);
-    if (!video) continue;
-    const [, rawTitle, , bvid] = video;
-    if (seen.has(bvid)) continue;
-    seen.add(bvid);
-    out.push({
-      bvid,
-      title: stripHTML(rawTitle).replace(/\s+/g, ' ').trim() || bvid,
-      author: '',
-      duration: '',
-      cover: recentCover,
-    });
-    if (out.length >= 12) break;
-  }
-  return out;
-}
-
 function stripHTML(s) {
   const div = document.createElement('div');
   div.innerHTML = s;
   return div.textContent || div.innerText || '';
-}
-
-function normalizeBiliCover(url) {
-  if (!url) return '';
-  if (url.startsWith('//')) return 'https:' + url;
-  if (url.startsWith('http://')) return url.replace(/^http:\/\//, 'https://');
-  return url;
 }
 
 function formatDur(sec) {
@@ -1557,6 +1382,113 @@ function buildFakeLrcFromPlainText(text, stepSeconds = 4) {
     .join('\n');
 }
 
+/* ---------------- PetitLyrics 逐字时间轴 ---------------- */
+async function fetchPetitLyricsWordTiming(title, artist) {
+  // 清理 artist：只取第一个（LRCLIB 常返回 "YOASOBI, Ayase" 格式）
+  const cleanArtist = artist?.split(/[,/&]| feat\.? /i)[0]?.trim() || '';
+  const attempts = [
+    { key_title: title, key_artist: cleanArtist },
+    { key_title: title, key_artist: '' },
+  ];
+  for (const params of attempts) {
+    try {
+      console.log('[PetitLyrics] 请求: title=' + params.key_title + ' artist=' + (params.key_artist || '(空)'));
+      const body = new URLSearchParams();
+      body.append('clientAppId', 'p1110417');
+      body.append('lyricsType', '3');
+      body.append('terminalType', '10');
+      body.append('key_title', params.key_title);
+      if (params.key_artist) body.append('key_artist', params.key_artist);
+      const resp = await fetch('https://p0.petitlyrics.com/api/GetPetitLyricsData.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+      if (!resp.ok) { console.warn('[PetitLyrics] HTTP', resp.status); continue; }
+      const xmlText = await resp.text();
+      const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
+      const lyricsType = doc.querySelector('lyricsType')?.textContent;
+      const lyricsData = doc.querySelector('lyricsData')?.textContent;
+      const matchedCount = doc.querySelector('matchedCount')?.textContent;
+      console.log('[PetitLyrics] 响应: lyricsType=' + lyricsType + ' matchedCount=' + matchedCount);
+      if (lyricsType === '3' && lyricsData) {
+        const parsed = parsePetitLyricsWordData(lyricsData);
+        console.log('[PetitLyrics] 解析成功: ' + (parsed?.length || 0) + ' 行逐字时间轴');
+        if (parsed?.length) console.log('[PetitLyrics] 第1行示例:', parsed[0].text, '| 字数:', parsed[0].words.length);
+        return parsed;
+      }
+    } catch (e) {
+      console.warn('[PetitLyrics] 错误:', e);
+    }
+  }
+  console.warn('[PetitLyrics] 无逐字数据');
+  return null;
+}
+
+function base64ToUtf8(base64) {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+function parsePetitLyricsWordData(base64Data) {
+  try {
+    const xmlStr = base64ToUtf8(base64Data);
+    const doc = new DOMParser().parseFromString(xmlStr, 'text/xml');
+    const lines = [];
+    const lineEls = doc.querySelectorAll('line');
+    lineEls.forEach(lineEl => {
+      const linestring = lineEl.querySelector('linestring')?.textContent || '';
+      const words = [];
+      lineEl.querySelectorAll('word').forEach(wordEl => {
+        const starttime = parseInt(wordEl.querySelector('starttime')?.textContent || '0', 10);
+        const endtime = parseInt(wordEl.querySelector('endtime')?.textContent || '0', 10);
+        const wordstring = wordEl.querySelector('wordstring')?.textContent || '';
+        if (wordstring) words.push({ starttime, endtime, text: wordstring });
+      });
+      if (linestring || words.length) {
+        const time = words.length ? words[0].starttime / 1000 : 0;
+        lines.push({ time, text: linestring, words });
+      }
+    });
+    return lines;
+  } catch (e) {
+    console.warn('[petitlyrics parse]', e);
+    return null;
+  }
+}
+
+function normalizeLyricsText(s) {
+  return s.replace(/[^\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\uFF66-\uFF9Fa-zA-Z0-9]/g, '').toLowerCase();
+}
+
+function matchPetitLyricsToLrc(plLines, lrcArr) {
+  if (!plLines || !plLines.length) return;
+  for (const lrcLine of lrcArr) {
+    const normLrc = normalizeLyricsText(lrcLine.text || '');
+    if (!normLrc) continue;
+    let bestMatch = null;
+    let bestScore = 0;
+    for (const pl of plLines) {
+      const normPl = normalizeLyricsText(pl.text || '');
+      if (!normPl) continue;
+      let score = 0;
+      if (normLrc === normPl) {
+        score = 1;
+      } else if (normLrc.includes(normPl) || normPl.includes(normLrc)) {
+        score = Math.min(normLrc.length, normPl.length) / Math.max(normLrc.length, normPl.length);
+      }
+      if (score > bestScore) { bestScore = score; bestMatch = pl; }
+    }
+    if (bestMatch && bestScore >= 0.6) {
+      lrcLine.wordTiming = bestMatch.words;
+    }
+  }
+}
+
 async function loadFromLrclib(item) {
   searchResults.hidden = true;
   const syncedLrc = item.syncedLyrics || '';
@@ -1565,13 +1497,27 @@ async function loadFromLrclib(item) {
   if (!lrc) { setStatus('该结果无歌词内容', true); return; }
   $('#lrc-text').value = lrc;
   startAssistActionsForLyric(item);
-  setStatus(`${syncedLrc ? '已载入' : '已载入纯文本歌词'}：${item.trackName} - ${item.artistName}；正在后台搜索 Kanogoma 和 Bilibili...`);
+  setStatus(`${syncedLrc ? '已载入' : '已载入纯文本歌词'}：${item.trackName} - ${item.artistName}；正在后台搜索 Kanogoma 与逐字时间轴...`);
   await loadLrcFromText(lrc);
   setPanelCollapsed(true);
   if (!syncedLrc) switchToTimerMode();
   void Promise.allSettled([
     prefetchKanogomaCandidatesForLyric(item),
-    prefetchBilibiliCandidatesForLyric(item),
+    (async () => {
+      const plLines = await fetchPetitLyricsWordTiming(item.trackName, item.artistName);
+      if (plLines) {
+        matchPetitLyricsToLrc(plLines, lrcLines);
+        const matched = lrcLines.filter(l => l.wordTiming).length;
+        console.log('[PetitLyrics] 匹配结果: ' + matched + '/' + lrcLines.length + ' 行');
+        if (matched > 0) {
+          const sample = lrcLines.find(l => l.wordTiming);
+          if (sample) console.log('[PetitLyrics] 匹配示例:', sample.text, '->', sample.wordTiming.length, '字');
+          setStatus(`已载入：${item.trackName} - ${item.artistName} · PetitLyrics 逐字时间轴已匹配 ${matched}/${lrcLines.length} 行`);
+        } else {
+          console.warn('[PetitLyrics] 无匹配行，将使用线性估算');
+        }
+      }
+    })(),
   ]);
 }
 
@@ -1609,9 +1555,7 @@ function switchToAudioMode() {
   hideTimerHud();
   audio.style.display = '';
   const yw = $('#yt-wrap'); if (yw) yw.hidden = true;
-  biliWrap.hidden = true;
   if (player.yt) { try { player.yt.stopVideo(); } catch {} }
-  $('#bili-iframe').src = '';
   // Only show player bar if an audio file is actually loaded
   setPlayerVisible(!!audio.src);
 }
@@ -1621,8 +1565,6 @@ async function switchToYouTubeMode(videoId) {
   audio.pause();
   audio.style.display = 'none';
   const yw = $('#yt-wrap'); if (yw) yw.hidden = false;
-  biliWrap.hidden = true;
-  $('#bili-iframe').src = '';
   hideTimerHud();
   await loadYouTubeAPI();
   if (player.yt) {
@@ -1637,7 +1579,7 @@ async function switchToYouTubeMode(videoId) {
         onError: (e) => {
           const codes = { 2: '无效的视频 ID', 5: 'HTML5 播放器错误', 100: '视频不存在或私有',
                           101: '上传者禁止外站嵌入', 150: '上传者禁止外站嵌入', 153: '上传者禁止外站嵌入' };
-          setStatus(`YouTube 错误 ${e.data}：${codes[e.data] || '未知'}。请换一首或改用 Bilibili / 计时模式。`, true);
+          setStatus(`YouTube 错误 ${e.data}：${codes[e.data] || '未知'}。请换一首或改用计时模式。`, true);
         }
       }
     });
@@ -1645,32 +1587,12 @@ async function switchToYouTubeMode(videoId) {
   startPolling();
 }
 
-function switchToBilibiliMode(bvid) {
-  player.mode = 'timer';
-  audio.pause();
-  audio.style.display = 'none';
-  const yw = $('#yt-wrap'); if (yw) yw.hidden = true;
-  if (player.yt) { try { player.yt.stopVideo(); } catch {} }
-  biliWrap.hidden = false;
-  setBiliPlayerCollapsed(localStorage.getItem('jplrc-bili-collapsed') !== '0');
-  // Use the official embed; high_quality=1, autoplay off (user starts manually to align with timer)
-  $('#bili-iframe').src = `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(bvid)}&high_quality=1&danmaku=0&autoplay=0`;
-  player.timerOffset = 0;
-  player.timerRunning = false;
-  showTimerHud();
-  setPlayerVisible(true);
-  startPolling();
-  setStatus('Bilibili 已载入。在 B 站播放器点播放的同时，点 ▶ 启动计时即可同步歌词。');
-}
-
 function switchToTimerMode() {
   player.mode = 'timer';
   audio.pause();
   audio.style.display = 'none';
   const yw = $('#yt-wrap'); if (yw) yw.hidden = true;
-  biliWrap.hidden = true;
   if (player.yt) { try { player.yt.stopVideo(); } catch {} }
-  $('#bili-iframe').src = '';
   player.timerOffset = 0;
   player.timerRunning = false;
   showTimerHud();
@@ -1707,20 +1629,6 @@ $('#btn-timer-reset').addEventListener('click', () => {
 $('#btn-timer-back').addEventListener('click', () => player.timerNudge(-0.5));
 $('#btn-timer-fwd').addEventListener('click', () => player.timerNudge(+0.5));
 
-function setBiliPlayerCollapsed(collapsed) {
-  biliWrap.classList.toggle('bili-collapsed', collapsed);
-  const btn = $('#btn-toggle-bili-player');
-  if (btn) {
-    btn.textContent = collapsed ? '展开' : '收起';
-    btn.setAttribute('aria-expanded', String(!collapsed));
-  }
-  localStorage.setItem('jplrc-bili-collapsed', collapsed ? '1' : '0');
-}
-
-$('#btn-toggle-bili-player')?.addEventListener('click', () => {
-  setBiliPlayerCollapsed(!biliWrap.classList.contains('bili-collapsed'));
-});
-
 // Spacebar to toggle in timer mode
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Space' && player.mode === 'timer' &&
@@ -1730,26 +1638,6 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-/* ---------------- Bilibili ---------------- */
-function parseBilibiliId(input) {
-  if (!input) return null;
-  const s = input.trim();
-  // direct BV
-  const bv = s.match(/BV[\w]{10}/);
-  if (bv) return bv[0];
-  // av number -> we still embed via aid by converting to BV is complex; bilibili player accepts aid via &aid=
-  return null;
-}
-
-$('#btn-load-bili').addEventListener('click', () => {
-  const bvid = parseBilibiliId($('#bili-url').value);
-  if (!bvid) { setStatus('无法识别 B 站链接（需包含 BVxxxxxxxxxx）', true); return; }
-  switchToBilibiliMode(bvid);
-});
-
-$('#btn-close-bili-search')?.addEventListener('click', () => setBiliSearchPopoverOpen(false));
-$('#btn-skip-bili-search')?.addEventListener('click', () => setBiliSearchPopoverOpen(false));
-$('#btn-open-bili-candidates')?.addEventListener('click', openLatestBiliCandidates);
 $('#btn-apply-kanogoma')?.addEventListener('click', () => {
   if (!latestKanogomaCandidates.length) {
     setStatus('当前还没有可用的 Kanogoma 注音结果', true);

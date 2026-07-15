@@ -594,6 +594,85 @@ $('#btn-reload-lyrics')?.addEventListener('click', () => {
   else setStatus('当前没有歌词文本可重新生成', true);
 });
 
+/* ---------------- Export lyrics ---------------- */
+function setExportPopoverOpen(open) {
+  const popover = $('#export-popover');
+  const btn = $('#btn-export');
+  if (!popover || !btn) return;
+  popover.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+  if (open) generateExportText();
+}
+
+function generateExportText() {
+  const wantJp = $('#export-jp')?.checked;
+  const wantRomaji = $('#export-romaji')?.checked;
+  const wantZh = $('#export-zh')?.checked;
+  const out = $('#export-output');
+  if (!out) return;
+  if (!lrcLines.length) { out.value = '暂无歌词'; return; }
+  const blocks = [];
+  for (const ln of lrcLines) {
+    const parts = [];
+    if (wantJp) parts.push(ln.text || '');
+    if (wantRomaji) {
+      // 从 DOM 中取纯文本罗马音（去除可能的 karaoke span）
+      let romaji = ln.romaji || '';
+      const romajiEl = ln.el?.querySelector('.romaji');
+      if (romajiEl) romaji = romajiEl.textContent || romaji;
+      if (romaji) parts.push(romaji);
+    }
+    if (wantZh) {
+      let zh = ln.zh || '';
+      const zhEl = ln.el?.querySelector('.zh');
+      if (zhEl) zh = zhEl.textContent || zh;
+      if (zh) parts.push(zh);
+    }
+    if (parts.length) blocks.push(parts.join('\n'));
+  }
+  out.value = blocks.join('\n\n');
+}
+
+$('#btn-export')?.addEventListener('click', (ev) => {
+  ev.stopPropagation();
+  const popover = $('#export-popover');
+  setExportPopoverOpen(popover?.hidden !== false);
+});
+$('#btn-close-export')?.addEventListener('click', () => setExportPopoverOpen(false));
+$('#btn-generate-export')?.addEventListener('click', () => generateExportText());
+['export-jp', 'export-romaji', 'export-zh'].forEach(id => {
+  $('#' + id)?.addEventListener('change', () => generateExportText());
+});
+$('#btn-copy-export')?.addEventListener('click', async () => {
+  const out = $('#export-output');
+  if (!out?.value) return;
+  try {
+    await navigator.clipboard.writeText(out.value);
+    setStatus('已复制到剪贴板');
+  } catch {
+    out.select();
+    document.execCommand('copy');
+    setStatus('已复制到剪贴板');
+  }
+});
+$('#btn-save-export')?.addEventListener('click', () => {
+  const out = $('#export-output');
+  if (!out?.value) return;
+  const blob = new Blob([out.value], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'lyrics.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+document.addEventListener('click', (ev) => {
+  const popover = $('#export-popover');
+  if (!popover || popover.hidden) return;
+  if (popover.contains(ev.target) || $('#btn-export')?.contains(ev.target)) return;
+  setExportPopoverOpen(false);
+});
+
 /* ---------------- LRC parsing ---------------- */
 function parseLRC(text) {
   const lines = text.split(/\r?\n/);

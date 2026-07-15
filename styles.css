@@ -206,6 +206,19 @@ body {
   animation: panelIn .25s ease;
 }
 .overrides-popover[hidden] { display: none; }
+.export-checkboxes {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+#export-output {
+  width: 100%;
+  font-family: "Inter", "Noto Sans JP", monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  resize: vertical;
+  margin-bottom: 10px;
+}
 .popover-head {
   display: flex;
   align-items: center;

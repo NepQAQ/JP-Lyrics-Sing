@@ -44,6 +44,15 @@
           </svg>
         </span>
       </button>
+      <button id="btn-export" class="icon-btn" aria-label="导出歌词" title="导出歌词">
+        <span class="icon-btn-glyph" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 3V15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M7 10L12 15L17 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M5 19H19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </span>
+      </button>
       <button id="btn-theme" class="icon-btn" aria-label="切换主题" title="切换日间/夜间模式">
         <span class="theme-icon">🌙</span>
       </button>
@@ -71,6 +80,27 @@
     <div class="row">
       <button id="btn-save-overrides" class="primary">保存并应用</button>
       <button id="btn-reload-lyrics">重新生成假名</button>
+    </div>
+  </aside>
+
+  <aside id="export-popover" class="overrides-popover glass" hidden>
+    <div class="popover-head">
+      <div>
+        <div class="popover-title">导出歌词</div>
+        <div class="popover-subtitle">选择要导出的内容</div>
+      </div>
+      <button id="btn-close-export" class="icon-btn popover-close" aria-label="关闭导出" title="关闭">×</button>
+    </div>
+    <div class="export-checkboxes">
+      <label class="chip"><input type="checkbox" id="export-jp" checked /><span>日语</span></label>
+      <label class="chip"><input type="checkbox" id="export-romaji" checked /><span>罗马音</span></label>
+      <label class="chip"><input type="checkbox" id="export-zh" /><span>中文</span></label>
+    </div>
+    <textarea id="export-output" rows="10" readonly placeholder="点击下方按钮生成..."></textarea>
+    <div class="row">
+      <button id="btn-generate-export" class="primary">生成</button>
+      <button id="btn-copy-export">复制到剪贴板</button>
+      <button id="btn-save-export">保存为 TXT</button>
     </div>
   </aside>
 

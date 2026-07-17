@@ -24,12 +24,21 @@
   <header class="app-header glass">
     <div class="brand">
       <span class="logo">🎤</span>
-      <h1>日语跟唱<span class="brand-sub">JP Lyrics Sing</span></h1>
+      <div class="brand-mode" id="brand-mode">
+        <button id="btn-app-mode" class="brand-mode-btn" type="button" aria-haspopup="listbox"
+          aria-expanded="false" aria-label="切换歌词与日语学习模式" title="切换歌词与日语学习模式">
+          <span class="brand-mode-text">日语跟唱</span>
+          <span class="brand-mode-arrow" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
+                stroke-linejoin="round" />
+            </svg>
+          </span>
+        </button>
+        <span class="brand-sub">JP Lyrics Sing</span>
+      </div>
     </div>
     <div class="header-actions">
-      <button id="btn-app-mode" class="app-mode-btn" aria-label="切换歌词与日语学习模式" title="切换歌词与日语学习模式">
-        <span class="app-mode-icon">🎵</span><span class="app-mode-text">歌词</span>
-      </button>
       <button id="btn-mode" class="mode-btn" aria-label="切换跳唱/阅读模式" title="切换跳唱/阅读模式">
         <span class="mode-icon">🎤</span><span class="mode-text">跟唱</span>
       </button>
@@ -68,6 +77,17 @@
       </button>
     </div>
   </header>
+
+  <aside class="brand-mode-menu glass" id="brand-mode-menu" role="listbox" hidden>
+    <button class="brand-mode-option active" type="button" data-mode="lyrics" role="option"
+      aria-selected="true">
+      <span class="brand-mode-opt-icon">🎵</span><span>歌词</span>
+    </button>
+    <button class="brand-mode-option" type="button" data-mode="study" role="option"
+      aria-selected="false">
+      <span class="brand-mode-opt-icon">📖</span><span>日语学习</span>
+    </button>
+  </aside>
 
   <aside id="overrides-popover" class="overrides-popover glass" hidden>
     <div class="popover-head">
@@ -270,6 +290,9 @@
     <div class="row annotation-actions">
       <button id="btn-apply-annotation" class="primary" type="button">应用</button>
       <button id="btn-remove-annotation" type="button">清除所选标记</button>
+    </div>
+    <div class="row annotation-actions annotation-actions-wide">
+      <button id="btn-clear-all-annotations" class="btn-danger" type="button">清除本曲所有标记</button>
     </div>
   </aside>
 

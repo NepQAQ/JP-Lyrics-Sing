@@ -144,15 +144,43 @@ body {
   flex: 0 0 auto;
   filter: drop-shadow(0 2px 8px rgba(124,243,255,0.6));
 }
-.brand h1 {
-  margin: 0; font-size: 17px; font-weight: 700;
-  letter-spacing: 0.3px;
-  display: flex; flex-direction: column; line-height: 1.1;
-}
 .brand-sub {
   font-size: 10px; font-weight: 500; color: var(--muted);
   letter-spacing: 1.5px; text-transform: uppercase; margin-top: 2px;
 }
+.brand-mode { position: relative; display: flex; flex-direction: column; line-height: 1.1; min-width: 0; }
+.brand-mode-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: transparent; border: 1px solid transparent; border-radius: 10px;
+  padding: 2px 6px 2px 2px; margin: -2px -6px -2px -2px;
+  color: var(--text-strong); font-size: 17px; font-weight: 700; letter-spacing: 0.3px;
+  cursor: pointer; transition: background .2s, border-color .2s, transform .12s;
+}
+.brand-mode-btn:hover { background: var(--hover); }
+.brand-mode-btn:active { transform: scale(0.97); }
+.brand-mode-arrow {
+  display: inline-flex; width: 14px; height: 14px; color: var(--muted);
+  transition: transform .2s ease;
+}
+.brand-mode-arrow svg { width: 100%; height: 100%; display: block; }
+body.brand-mode-open .brand-mode-arrow { transform: rotate(180deg); }
+body.app-study .brand-mode-btn { color: var(--accent); }
+.brand-mode-menu {
+  position: fixed; top: calc(var(--app-header-height) + 8px); left: 12px; z-index: 50;
+  min-width: 156px; padding: 5px; border-radius: 12px;
+  box-shadow: var(--panel-shadow); animation: panelIn .2s ease;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.brand-mode-menu[hidden] { display: none; }
+.brand-mode-option {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 10px; background: transparent; border: none; border-radius: 8px;
+  color: var(--text); font-size: 14px; font-weight: 500; text-align: left;
+  cursor: pointer; transition: background .15s, color .15s;
+}
+.brand-mode-option:hover { background: var(--hover); }
+.brand-mode-option.active { color: var(--accent); font-weight: 600; }
+.brand-mode-opt-icon { font-size: 15px; flex: 0 0 auto; }
 .header-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .icon-btn {
   background: var(--chip-bg);
@@ -342,6 +370,14 @@ body {
 #annotation-note:disabled { opacity: .48; cursor: not-allowed; }
 .annotation-actions { justify-content: flex-end; }
 .annotation-actions button { border-radius: 8px; font-size: 12px; padding: 8px 11px; }
+.annotation-actions-wide { justify-content: stretch; }
+.annotation-actions-wide button { flex: 1 1 auto; }
+.btn-danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.btn-danger:hover { background: color-mix(in srgb, var(--danger) 22%, transparent); }
 
 .mode-btn {
   display: inline-flex; align-items: center; gap: 6px;
@@ -362,27 +398,6 @@ body.mode-read .mode-btn {
   color: var(--text);
   border: 1px solid var(--chip-border);
   box-shadow: none;
-}
-.app-mode-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  height: 40px; padding: 0 14px;
-  background: var(--chip-bg);
-  color: var(--text);
-  border: 1px solid var(--chip-border);
-  border-radius: 999px;
-  font-size: 13px; font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: transform .12s, background .2s, border-color .2s;
-}
-.app-mode-btn:hover { background: var(--hover); transform: translateY(-1px); }
-.app-mode-btn:active { transform: scale(0.96); }
-.app-mode-btn .app-mode-icon { font-size: 14px; }
-body.app-study .app-mode-btn {
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  color: #07091c;
-  border-color: transparent;
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 body.app-study #panel,
 body.app-study #lyrics-view,
@@ -490,6 +505,10 @@ button.primary:hover { filter: brightness(1.08); }
   background: linear-gradient(135deg, var(--accent), var(--accent-3));
   color: #07091c;
   letter-spacing: 0.5px;
+}
+.badge-cache {
+  background: color-mix(in srgb, var(--accent-2) 70%, var(--accent));
+  color: #07091c;
 }
 
 .assist-actions {
@@ -998,20 +1017,20 @@ body.mode-read .lyrics-view {
   background-size: 100% 2px;
 }
 .romaji-mark-tone2 {
-  background-image: linear-gradient(to top right,
+  background-image: linear-gradient(to bottom right,
     transparent 42%, var(--active) 44%, var(--active) 56%, transparent 58%);
   background-position: left top;
   background-size: 100% 7px;
 }
 .romaji-mark-tone3 {
   background-image:
-    linear-gradient(to bottom right, transparent 40%, var(--active) 43%, var(--active) 57%, transparent 60%),
-    linear-gradient(to top right, transparent 40%, var(--active) 43%, var(--active) 57%, transparent 60%);
+    linear-gradient(to top right, transparent 40%, var(--active) 43%, var(--active) 57%, transparent 60%),
+    linear-gradient(to bottom right, transparent 40%, var(--active) 43%, var(--active) 57%, transparent 60%);
   background-position: left top, right top;
   background-size: 52% 7px, 52% 7px;
 }
 .romaji-mark-tone4 {
-  background-image: linear-gradient(to bottom right,
+  background-image: linear-gradient(to top right,
     transparent 42%, var(--active) 44%, var(--active) 56%, transparent 58%);
   background-position: left top;
   background-size: 100% 7px;
@@ -1184,16 +1203,14 @@ body.no-player .lyrics-view { padding-bottom: 32px; }
 
 @media (max-width: 480px) {
   :root { --header-body-height: 58px; }
-  .brand h1 { font-size: 15px; }
+  .brand-mode-btn { font-size: 15px; }
   .brand-sub { display: none; }
   .icon-btn { width: 38px; height: 38px; }
   .app-header { padding-left: 10px; padding-right: 10px; }
   .brand { gap: 8px; }
   .logo { font-size: 20px; }
   .header-actions { gap: 6px; }
-  .app-mode-btn,
   .mode-btn { padding: 0 10px; }
-  .app-mode-btn .app-mode-text,
   .mode-btn .mode-text { display: none; }
   .panel {
     margin: 8px;

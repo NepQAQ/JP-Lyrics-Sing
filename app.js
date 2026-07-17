@@ -51,17 +51,22 @@ $('#btn-theme').addEventListener('click', () => {
 
 /* ---------------- App Mode (lyrics vs study) ---------------- */
 const APP_MODE_KEY = 'jplrc-app-mode';
+const brandModeMenu = $('#brand-mode-menu');
 function applyAppMode(mode) {
   const next = mode === 'study' ? 'study' : 'lyrics';
   document.body.classList.toggle('app-study', next === 'study');
   if (studyView) studyView.hidden = next !== 'study';
   const btn = $('#btn-app-mode');
   if (btn) {
-    btn.querySelector('.app-mode-icon').textContent = next === 'study' ? '📖' : '🎵';
-    btn.querySelector('.app-mode-text').textContent = next === 'study' ? '学习' : '歌词';
-    btn.title = next === 'study' ? '当前：日语学习模式 · 点击切回歌词' : '当前：歌词模式 · 点击切到日语学习';
-    btn.setAttribute('aria-label', next === 'study' ? '切回歌词模式' : '切到日语学习模式');
+    btn.querySelector('.brand-mode-text').textContent = next === 'study' ? '日语学习' : '日语跟唱';
+    btn.title = next === 'study' ? '当前：日语学习模式 · 点击切回歌词' : '当前：歌词模式 · 点击切换';
+    btn.setAttribute('aria-label', next === 'study' ? '切回歌词模式' : '切换歌词与日语学习模式');
   }
+  $$('.brand-mode-option').forEach(opt => {
+    const isActive = opt.dataset.mode === next;
+    opt.classList.toggle('active', isActive);
+    opt.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
   if (next === 'study') {
     audio.pause();
     if (player.mode === 'timer' && player.timerRunning) player.timerToggle();
@@ -71,9 +76,30 @@ function applyAppMode(mode) {
   localStorage.setItem(APP_MODE_KEY, next);
 }
 
-$('#btn-app-mode')?.addEventListener('click', () => {
-  const next = document.body.classList.contains('app-study') ? 'lyrics' : 'study';
-  applyAppMode(next);
+function setBrandModeMenuOpen(open) {
+  if (!brandModeMenu) return;
+  brandModeMenu.hidden = !open;
+  $('#btn-app-mode')?.setAttribute('aria-expanded', String(open));
+  document.body.classList.toggle('brand-mode-open', open);
+}
+
+$('#btn-app-mode')?.addEventListener('click', (ev) => {
+  ev.stopPropagation();
+  setBrandModeMenuOpen(brandModeMenu?.hidden !== false);
+});
+$$('.brand-mode-option').forEach(opt => {
+  opt.addEventListener('click', () => {
+    applyAppMode(opt.dataset.mode);
+    setBrandModeMenuOpen(false);
+  });
+});
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') setBrandModeMenuOpen(false);
+});
+document.addEventListener('click', (ev) => {
+  if (!brandModeMenu || brandModeMenu.hidden) return;
+  if ($('#brand-mode')?.contains(ev.target) || brandModeMenu.contains(ev.target)) return;
+  setBrandModeMenuOpen(false);
 });
 
 /* ---------------- Display Mode (sing-along vs read) ---------------- */
@@ -91,8 +117,13 @@ function applyMode(mode) {
 applyMode(localStorage.getItem(MODE_KEY) || 'sing');
 $('#btn-mode')?.addEventListener('click', () => {
   const next = document.body.classList.contains('mode-read') ? 'sing' : 'read';
-  if (next === 'sing') setRomajiMarkupMode(false, false);
-  applyMode(next);
+  if (next === 'read') {
+    // 进入阅读模式时自动启动罗马音标记，无需展开面板勾选
+    setRomajiMarkupMode(true, false);
+  } else {
+    setRomajiMarkupMode(false, false);
+    applyMode(next);
+  }
 });
 
 /* Show/hide player bar based on whether any audio source is active. */
@@ -531,6 +562,32 @@ $('#btn-remove-annotation')?.addEventListener('click', () => {
   rerenderRomajiAnnotations(key, text, sourceText);
   closeAnnotationPopover();
   setStatus('所选范围内的标记已清除。');
+});
+
+$('#btn-clear-all-annotations')?.addEventListener('click', () => {
+  if (!lrcLines.length) {
+    setStatus('当前没有歌词可清除。', true);
+    return;
+  }
+  let cleared = 0;
+  for (const ln of lrcLines) {
+    const key = getRomajiAnnotationKey(ln.text, ln.romaji || '');
+    if (romajiAnnotations[key]) {
+      delete romajiAnnotations[key];
+      cleared++;
+    }
+  }
+  saveRomajiAnnotations();
+  for (const ln of lrcLines) {
+    const romajiEl = ln.el?.querySelector('.romaji');
+    if (romajiEl) {
+      romajiEl._karaokeText = undefined;
+      romajiEl._karaokeBuilt = false;
+      renderRomajiText(romajiEl, ln.romaji || '', ln.text);
+    }
+  }
+  closeAnnotationPopover();
+  setStatus(cleared ? `已清除本曲 ${cleared} 行的标记。` : '本曲尚无标记。');
 });
 
 $('#btn-toggle-panel').addEventListener('click', () => {
@@ -1046,7 +1103,7 @@ async function renderLyrics(parsed) {
   const autoTranslate = $('#auto-translate').checked;
   for (let i = 0; i < lrcLines.length; i++) {
     const ln = lrcLines[i];
-    const needsGeneratedRomaji = !ln.romaji || !hasWordSpacedRomaji(ln.romaji);
+    const needsGeneratedRomaji = !ln.cached && (!ln.romaji || !hasWordSpacedRomaji(ln.romaji));
     if (ln.jpHTML && !needsGeneratedRomaji) {
       ln.el.querySelector('.jp').innerHTML = ln.jpHTML;
       renderRomajiText(ln.el.querySelector('.romaji'), ln.romaji || '', ln.text);
@@ -1515,7 +1572,7 @@ function getLyricFocusRatio() {
 /* ---------------- KTV karaoke progress (char-level spans) ---------------- */
 let karaokeRafId = null;
 
-function buildKaraokeSpans(el, text, parentEl) {
+function buildKaraokeSpansPreservingRuby(el, text, parentEl) {
   if (el._karaokeText === text && el._karaokeBuilt) return;
   // 备份原始 HTML（用于恢复 furigana）
   if (parentEl && !parentEl._jpHTMLBackup) {
@@ -1523,13 +1580,54 @@ function buildKaraokeSpans(el, text, parentEl) {
   }
   el._karaokeText = text;
   el._karaokeBuilt = true;
-  // 将文本按字符包裹 span，便于逐字变色
-  let html = '';
-  for (let i = 0; i < text.length; i++) {
-    html += `<span class="karaoke-char" data-i="${i}">${escapeHTML(text[i])}</span>`;
+  // 仅包裹基础字符（跳过 <rt> 注音），保留 ruby/rt 结构，使跟唱高亮行仍显示假名
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (parent && parent.closest('rt')) return NodeFilter.FILTER_REJECT;
+      return node.nodeValue.length ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    }
+  });
+  const textNodes = [];
+  let node;
+  while ((node = walker.nextNode())) textNodes.push(node);
+  let count = 0;
+  for (const tn of textNodes) {
+    const frag = document.createDocumentFragment();
+    for (const ch of tn.nodeValue) {
+      const span = document.createElement('span');
+      span.className = 'karaoke-char';
+      span.textContent = ch;
+      frag.appendChild(span);
+      count++;
+    }
+    tn.parentNode.replaceChild(frag, tn);
   }
-  el.innerHTML = html;
-  el._karaokeCharCount = text.length;
+  el._karaokeCharCount = count;
+}
+
+// 包裹所有文本字符为 karaoke span，同时保留 .romaji-mark / .romaji-break 标记结构
+function buildKaraokeSpansPreservingMarks(el, text) {
+  if (el._karaokeText === text && el._karaokeBuilt) return;
+  el._karaokeText = text;
+  el._karaokeBuilt = true;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  let node;
+  while ((node = walker.nextNode())) textNodes.push(node);
+  let count = 0;
+  for (const tn of textNodes) {
+    const frag = document.createDocumentFragment();
+    for (const ch of tn.nodeValue) {
+      const span = document.createElement('span');
+      span.className = 'karaoke-char';
+      span.textContent = ch;
+      frag.appendChild(span);
+      count++;
+    }
+    tn.parentNode.replaceChild(frag, tn);
+  }
+  el._karaokeCharCount = count;
 }
 
 function updateKaraokeProgress(t) {
@@ -1539,15 +1637,15 @@ function updateKaraokeProgress(t) {
   const romajiEl = line.el.querySelector('.romaji');
   if (!jpEl) return;
 
-  // 确保 span 已构建
+  // 确保 span 已构建（保留 furigana 注音）
   const plainText = line.text || '';
   if (plainText && jpEl._karaokeText !== plainText) {
-    buildKaraokeSpans(jpEl, plainText, line.el);
+    buildKaraokeSpansPreservingRuby(jpEl, plainText, line.el);
   }
-  // 罗马音也需要 span
+  // 罗马音也需要 span（保留标记结构）
   const romajiText = line.romaji || romajiEl?.textContent || '';
   if (romajiEl && romajiText && romajiEl._karaokeText !== romajiText) {
-    buildKaraokeSpans(romajiEl, romajiText);
+    buildKaraokeSpansPreservingMarks(romajiEl, romajiText);
   }
 
   let sungChars;
@@ -1736,6 +1834,82 @@ searchInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') doSearch();
 });
 
+/* ---------------- Local lyrics cache (search history) ---------------- */
+const LYRICS_CACHE_KEY = 'jplrc-lyrics-cache';
+const LYRICS_CACHE_MAX = 30;
+let lyricsCache = {};
+try { lyricsCache = JSON.parse(localStorage.getItem(LYRICS_CACHE_KEY) || '{}'); } catch { lyricsCache = {}; }
+
+function lyricsCacheKey(item) {
+  if (item && item.id != null) return 'id:' + item.id;
+  return 'k:' + (item?.trackName || '') + '|' + (item?.artistName || '') + '|' + (item?.duration || 0);
+}
+
+function persistLyricsCache() {
+  try {
+    localStorage.setItem(LYRICS_CACHE_KEY, JSON.stringify(lyricsCache));
+  } catch (e) {
+    // 配额不足：淘汰一半最旧条目后重试一次
+    const entries = Object.entries(lyricsCache).sort((a, b) => a[1].savedAt - b[1].savedAt);
+    const keep = Math.max(1, Math.floor(entries.length / 2));
+    lyricsCache = Object.fromEntries(entries.slice(-keep));
+    try { localStorage.setItem(LYRICS_CACHE_KEY, JSON.stringify(lyricsCache)); }
+    catch (e2) { console.warn('[lyrics-cache] save failed:', e2); }
+  }
+}
+
+function saveLyricsToCache(item, lrcText) {
+  if (!lrcLines.length || !item) return;
+  const key = lyricsCacheKey(item);
+  lyricsCache[key] = {
+    meta: {
+      title: item.trackName || '',
+      artist: item.artistName || '',
+      album: item.albumName || '',
+      duration: item.duration || 0,
+      query: searchInput.value.trim(),
+    },
+    lrc: lrcText || '',
+    lines: lrcLines.map(l => ({
+      time: l.time, text: l.text,
+      jpHTML: l.jpHTML || '',
+      romaji: l.romaji || '',
+      zh: l.zh || '',
+      wordTiming: l.wordTiming || null,
+    })),
+    savedAt: Date.now(),
+  };
+  const entries = Object.entries(lyricsCache);
+  if (entries.length > LYRICS_CACHE_MAX) {
+    entries.sort((a, b) => a[1].savedAt - b[1].savedAt);
+    for (let i = 0; i < entries.length - LYRICS_CACHE_MAX; i++) delete lyricsCache[entries[i][0]];
+  }
+  persistLyricsCache();
+}
+
+function cacheMatchesQuery(entry, q) {
+  if (!q) return false;
+  const ql = q.toLowerCase();
+  const m = entry.meta || {};
+  return (m.title || '').toLowerCase().includes(ql)
+    || (m.artist || '').toLowerCase().includes(ql)
+    || (m.query || '').toLowerCase().includes(ql);
+}
+
+async function loadFromCache(entry) {
+  searchResults.hidden = true;
+  $('#lrc-text').value = entry.lrc || '';
+  const parsed = (entry.lines || []).map(l => ({
+    time: l.time, text: l.text,
+    jpHTML: l.jpHTML, romaji: l.romaji, zh: l.zh,
+    wordTiming: l.wordTiming, cached: true,
+  }));
+  setStatus(`从本地缓存载入：${entry.meta?.title || ''} - ${entry.meta?.artist || ''}`);
+  await renderLyrics(parsed);
+  setPanelCollapsed(true);
+  if (!entry.lrc) switchToTimerMode();
+}
+
 async function doSearch() {
   const q = searchInput.value.trim();
   if (!q) return;
@@ -1762,6 +1936,27 @@ async function doSearch() {
   if (requestId !== searchRequestId) return;
 
   searchResults.innerHTML = '';
+
+  // 本地缓存（搜索历史）：命中则可直接载入，无需重新联网
+  const cacheEntries = Object.values(lyricsCache)
+    .filter(entry => cacheMatchesQuery(entry, q))
+    .sort((a, b) => b.savedAt - a.savedAt);
+  if (cacheEntries.length) {
+    const cacheHead = document.createElement('div');
+    cacheHead.className = 'search-section-head';
+    cacheHead.textContent = '本地缓存（点击直接载入）';
+    searchResults.appendChild(cacheHead);
+    cacheEntries.forEach(entry => {
+      const div = document.createElement('div');
+      div.className = 'result-item';
+      div.innerHTML = `
+        <div class="title">${escapeHTML(entry.meta.title || '(无标题)')} <span class="badge badge-cache">缓存</span></div>
+        <div class="meta">${escapeHTML(entry.meta.artist || '')} · ${formatDur(entry.meta.duration)} · ${new Date(entry.savedAt).toLocaleDateString()}</div>
+      `;
+      div.addEventListener('click', () => loadFromCache(entry));
+      searchResults.appendChild(div);
+    });
+  }
 
   if (!lrcList.length) {
     const empty = document.createElement('div');
@@ -1956,7 +2151,7 @@ async function loadFromLrclib(item) {
   await loadLrcFromText(lrc);
   setPanelCollapsed(true);
   if (!syncedLrc) switchToTimerMode();
-  void Promise.allSettled([
+  Promise.allSettled([
     prefetchKanogomaCandidatesForLyric(item),
     (async () => {
       const plLines = await fetchPetitLyricsWordTiming(item.trackName, item.artistName);
@@ -1973,7 +2168,7 @@ async function loadFromLrclib(item) {
         }
       }
     })(),
-  ]);
+  ]).then(() => saveLyricsToCache(item, lrc));
 }
 
 /* ---------------- YouTube ---------------- */

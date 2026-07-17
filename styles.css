@@ -246,6 +246,103 @@ body {
 }
 .overrides-popover textarea { margin-top: 10px; }
 
+/* ===== Romaji annotation editor ===== */
+.annotation-popover {
+  position: fixed;
+  z-index: 70;
+  width: min(390px, calc(100vw - 20px));
+  max-height: calc(100vh - 20px);
+  overflow-y: auto;
+  padding: 14px;
+  border-radius: 14px;
+  box-shadow: var(--panel-shadow);
+  animation: panelIn .18s ease;
+}
+.annotation-popover[hidden] { display: none; }
+.annotation-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.annotation-selection {
+  max-width: 290px;
+  margin-top: 3px;
+  color: var(--accent);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.annotation-types {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.tone-types {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+  padding: 3px;
+  margin-bottom: 7px;
+  border: 1px solid var(--input-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--input-bg) 82%, transparent);
+}
+.annotation-type {
+  min-width: 0;
+  padding: 8px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--muted);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.annotation-type.active {
+  color: var(--text-strong);
+  border-color: color-mix(in srgb, var(--accent) 58%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--input-bg));
+}
+.tone-type {
+  gap: 3px;
+  padding: 7px 3px;
+  border-color: transparent;
+  background: transparent;
+  white-space: nowrap;
+}
+.tone-number {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+.tone-glyph {
+  color: var(--active);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
+.annotation-sample {
+  position: relative;
+  color: var(--text-strong);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.sample-phrase { border-bottom: 2px solid var(--accent); }
+.sample-break { color: var(--accent-2); font-weight: 700; font-style: normal; }
+.sample-note { border-bottom: 2px dotted var(--accent-2); }
+#annotation-note {
+  width: 100%;
+  margin-bottom: 10px;
+  border-radius: 8px;
+}
+#annotation-note:disabled { opacity: .48; cursor: not-allowed; }
+.annotation-actions { justify-content: flex-end; }
+.annotation-actions button { border-radius: 8px; font-size: 12px; padding: 8px 11px; }
+
 .mode-btn {
   display: inline-flex; align-items: center; gap: 6px;
   height: 40px; padding: 0 14px;
@@ -865,6 +962,118 @@ body.mode-read .lyrics-view {
   word-break: normal;
   text-wrap: pretty;
 }
+.romaji-markup-mode .romaji {
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.romaji-markup-mode .romaji::selection,
+.romaji-markup-mode .romaji *::selection {
+  color: var(--text-strong);
+  background: color-mix(in srgb, var(--accent-2) 48%, transparent);
+}
+.romaji-mark {
+  position: relative;
+  color: inherit;
+  font-style: inherit;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.romaji-mark-phrase {
+  padding: 0 1px 2px;
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 88%, var(--text-strong));
+}
+.romaji-mark-tone1,
+.romaji-mark-tone2,
+.romaji-mark-tone3,
+.romaji-mark-tone4 {
+  padding-top: 7px;
+  background-repeat: no-repeat;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.romaji-mark-tone1 {
+  background-image: linear-gradient(var(--active), var(--active));
+  background-position: left 2px;
+  background-size: 100% 2px;
+}
+.romaji-mark-tone2 {
+  background-image: linear-gradient(to top right,
+    transparent 42%, var(--active) 44%, var(--active) 56%, transparent 58%);
+  background-position: left top;
+  background-size: 100% 7px;
+}
+.romaji-mark-tone3 {
+  background-image:
+    linear-gradient(to bottom right, transparent 40%, var(--active) 43%, var(--active) 57%, transparent 60%),
+    linear-gradient(to top right, transparent 40%, var(--active) 43%, var(--active) 57%, transparent 60%);
+  background-position: left top, right top;
+  background-size: 52% 7px, 52% 7px;
+}
+.romaji-mark-tone4 {
+  background-image: linear-gradient(to bottom right,
+    transparent 42%, var(--active) 44%, var(--active) 56%, transparent 58%);
+  background-position: left top;
+  background-size: 100% 7px;
+}
+.romaji-mark-tone1::after,
+.romaji-mark-tone2::after,
+.romaji-mark-tone3::after,
+.romaji-mark-tone4::after {
+  content: attr(data-tone);
+  position: absolute;
+  top: -8px;
+  right: -2px;
+  color: var(--active);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+}
+.romaji-break {
+  position: relative;
+  display: inline-block;
+  width: .5em;
+  height: 1em;
+  vertical-align: -.08em;
+}
+.romaji-break::after {
+  content: '/';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  color: var(--accent-2);
+  font-size: 1.05em;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  transform: translate(-50%, -50%);
+}
+.romaji-mark-note {
+  padding-bottom: 2px;
+  border-bottom: 2px dotted var(--accent-2);
+}
+.romaji-mark-note::before {
+  content: attr(data-note);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 3px);
+  max-width: 160px;
+  padding: 1px 5px;
+  transform: translateX(-50%);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent-2) 18%, var(--panel-solid));
+  color: var(--text-strong);
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .16);
+}
+.romaji.has-romaji-note { margin-top: 26px; }
 .zh {
   font-family: "Noto Sans SC", sans-serif;
   font-size: 14px; color: var(--muted); margin-top: 4px;
@@ -1018,6 +1227,16 @@ body.no-player .lyrics-view { padding-bottom: 32px; }
   .study-head { align-items: flex-start; }
   .study-voice-row { grid-template-columns: 1fr; gap: 6px; }
   .study-line { padding-right: 50px; }
+  .annotation-popover {
+    left: 10px !important;
+    right: 10px;
+    width: auto;
+    padding: 12px;
+  }
+  .annotation-types { gap: 4px; }
+  .annotation-type { gap: 5px; padding-left: 4px; padding-right: 4px; }
+  .annotation-actions { justify-content: stretch; }
+  .annotation-actions button { flex: 1 1 auto; }
   .tab { font-size: 12px; padding: 8px 4px; }
 }
 

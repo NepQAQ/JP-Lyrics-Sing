@@ -91,6 +91,7 @@ function applyMode(mode) {
 applyMode(localStorage.getItem(MODE_KEY) || 'sing');
 $('#btn-mode')?.addEventListener('click', () => {
   const next = document.body.classList.contains('mode-read') ? 'sing' : 'read';
+  if (next === 'sing') setRomajiMarkupMode(false, false);
   applyMode(next);
 });
 
@@ -248,6 +249,288 @@ function applyToggleClasses() {
 }
 ['show-furigana', 'show-romaji', 'show-zh'].forEach(id => {
   $('#' + id).addEventListener('change', applyToggleClasses);
+});
+
+/* ---------------- Romaji annotations ---------------- */
+const ROMAJI_ANNOTATIONS_KEY = 'jplrc-romaji-annotations';
+const romajiMarkupToggle = $('#enable-romaji-markup');
+const annotationPopover = $('#romaji-annotation-popover');
+const annotationNoteInput = $('#annotation-note');
+let romajiAnnotations = {};
+let annotationSelection = null;
+let selectedAnnotationType = 'phrase';
+let annotationAnchorRect = null;
+
+try {
+  romajiAnnotations = JSON.parse(localStorage.getItem(ROMAJI_ANNOTATIONS_KEY) || '{}');
+} catch {
+  romajiAnnotations = {};
+}
+
+function getRomajiAnnotationKey(sourceText, romajiText) {
+  return `${sourceText || ''}\u241e${romajiText || ''}`;
+}
+
+function saveRomajiAnnotations() {
+  localStorage.setItem(ROMAJI_ANNOTATIONS_KEY, JSON.stringify(romajiAnnotations));
+}
+
+function renderRomajiText(el, text, sourceText = '') {
+  if (!el) return;
+  const romajiText = String(text || '');
+  const key = getRomajiAnnotationKey(sourceText, romajiText);
+  el.dataset.annotationKey = key;
+  el.dataset.annotationSource = sourceText || '';
+  el.classList.remove('has-romaji-note');
+
+  const annotations = (romajiAnnotations[key] || [])
+    .map(item => item.type === 'accent' ? { ...item, type: 'tone4' } : item)
+    .filter(item => {
+      if (!Number.isInteger(item.start) || !Number.isInteger(item.end)) return false;
+      if (item.type === 'break') {
+        return item.start === item.end && item.start >= 0 && item.start <= romajiText.length;
+      }
+      return item.start >= 0 && item.end <= romajiText.length && item.end > item.start;
+    });
+  if (!annotations.length) {
+    el.textContent = romajiText;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  const breakPositions = [...new Set(annotations
+    .filter(item => item.type === 'break')
+    .map(item => item.start))].sort((a, b) => a - b);
+  const rangeAnnotations = annotations
+    .filter(item => item.type !== 'break')
+    .sort((a, b) => a.start - b.start);
+  const renderedBreaks = new Set();
+
+  function appendTextWithBreaks(parent, start, end, includeEnd = false) {
+    let textCursor = start;
+    for (const position of breakPositions) {
+      if (renderedBreaks.has(position) || position < start || position > end) continue;
+      if (position === end && !includeEnd) continue;
+      if (position > textCursor) {
+        parent.appendChild(document.createTextNode(romajiText.slice(textCursor, position)));
+      }
+      const breakpoint = document.createElement('span');
+      breakpoint.className = 'romaji-break';
+      breakpoint.dataset.position = position;
+      breakpoint.setAttribute('aria-label', '中断');
+      breakpoint.title = '中断';
+      parent.appendChild(breakpoint);
+      renderedBreaks.add(position);
+      textCursor = position;
+    }
+    if (textCursor < end) {
+      parent.appendChild(document.createTextNode(romajiText.slice(textCursor, end)));
+    }
+  }
+
+  let cursor = 0;
+  for (const annotation of rangeAnnotations) {
+    if (annotation.start < cursor) continue;
+    if (annotation.start > cursor) {
+      appendTextWithBreaks(fragment, cursor, annotation.start);
+    }
+    const mark = document.createElement('span');
+    mark.className = `romaji-mark romaji-mark-${annotation.type}`;
+    mark.dataset.start = annotation.start;
+    mark.dataset.end = annotation.end;
+    if (/^tone[1-4]$/.test(annotation.type)) {
+      const tone = annotation.type.slice(-1);
+      mark.dataset.tone = tone;
+      mark.title = `${tone} 声`;
+    }
+    if (annotation.type === 'note' && annotation.note) {
+      mark.dataset.note = annotation.note;
+      mark.title = annotation.note;
+      el.classList.add('has-romaji-note');
+    }
+    appendTextWithBreaks(mark, annotation.start, annotation.end, true);
+    fragment.appendChild(mark);
+    cursor = annotation.end;
+  }
+  if (cursor < romajiText.length) {
+    appendTextWithBreaks(fragment, cursor, romajiText.length, true);
+  } else {
+    appendTextWithBreaks(fragment, cursor, cursor, true);
+  }
+  el.replaceChildren(fragment);
+}
+
+function rerenderRomajiAnnotations(key, text, sourceText) {
+  $$('.romaji').forEach(el => {
+    if (el.dataset.annotationKey === key) renderRomajiText(el, text, sourceText);
+  });
+}
+
+function closeAnnotationPopover(clearSelection = true) {
+  if (annotationPopover) annotationPopover.hidden = true;
+  annotationSelection = null;
+  annotationAnchorRect = null;
+  if (clearSelection) window.getSelection()?.removeAllRanges();
+}
+
+function setAnnotationType(type) {
+  selectedAnnotationType = type;
+  $$('.annotation-type').forEach(button => {
+    const active = button.dataset.annotationType === type;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  if (annotationNoteInput) {
+    annotationNoteInput.disabled = type !== 'note';
+    if (type === 'note') annotationNoteInput.focus();
+  }
+}
+
+function positionAnnotationPopover(rect) {
+  if (!annotationPopover || annotationPopover.hidden) return;
+  const gap = 10;
+  const width = annotationPopover.offsetWidth;
+  const height = annotationPopover.offsetHeight;
+  const left = Math.min(window.innerWidth - width - gap, Math.max(gap, rect.left + rect.width / 2 - width / 2));
+  const roomBelow = window.innerHeight - rect.bottom;
+  const preferredTop = roomBelow >= height + gap
+    ? rect.bottom + gap
+    : rect.top - height - gap;
+  const top = Math.min(window.innerHeight - height - gap, Math.max(gap, preferredTop));
+  annotationPopover.style.left = `${left}px`;
+  annotationPopover.style.top = `${top}px`;
+}
+
+function captureRomajiSelection() {
+  if (!romajiMarkupToggle?.checked) return;
+  const selection = window.getSelection();
+  if (!selection || !selection.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  const startEl = (range.startContainer.nodeType === Node.ELEMENT_NODE
+    ? range.startContainer
+    : range.startContainer.parentElement)?.closest?.('.romaji');
+  const endEl = (range.endContainer.nodeType === Node.ELEMENT_NODE
+    ? range.endContainer
+    : range.endContainer.parentElement)?.closest?.('.romaji');
+  if (!startEl || startEl !== endEl || startEl.closest('.karaoke-char')) return;
+
+  const beforeStart = document.createRange();
+  beforeStart.selectNodeContents(startEl);
+  beforeStart.setEnd(range.startContainer, range.startOffset);
+  const beforeEnd = document.createRange();
+  beforeEnd.selectNodeContents(startEl);
+  beforeEnd.setEnd(range.endContainer, range.endOffset);
+  const fullText = startEl.textContent || '';
+  let start = beforeStart.toString().length;
+  let end = beforeEnd.toString().length;
+  if (!selection.isCollapsed) {
+    while (start < end && /\s/.test(fullText[start])) start++;
+    while (end > start && /\s/.test(fullText[end - 1])) end--;
+    if (end <= start) return;
+  }
+
+  annotationSelection = {
+    el: startEl,
+    key: startEl.dataset.annotationKey || getRomajiAnnotationKey(startEl.dataset.annotationSource, fullText),
+    sourceText: startEl.dataset.annotationSource || '',
+    text: fullText,
+    start,
+    end,
+  };
+  const contextStart = Math.max(0, start - 8);
+  const contextEnd = Math.min(fullText.length, start + 8);
+  $('#annotation-selection').textContent = selection.isCollapsed
+    ? `插入点：${fullText.slice(contextStart, start)}|${fullText.slice(start, contextEnd)}`
+    : `“${fullText.slice(start, end)}”`;
+  annotationNoteInput.value = '';
+  setAnnotationType(selection.isCollapsed ? 'break' : 'phrase');
+  annotationPopover.hidden = false;
+  annotationAnchorRect = range.getBoundingClientRect();
+  requestAnimationFrame(() => positionAnnotationPopover(annotationAnchorRect));
+}
+
+function setRomajiMarkupMode(enabled, announce = true) {
+  if (!romajiMarkupToggle) return;
+  romajiMarkupToggle.checked = enabled;
+  document.body.classList.toggle('romaji-markup-mode', enabled);
+  if (enabled) {
+    $('#show-romaji').checked = true;
+    applyToggleClasses();
+    applyMode('read');
+    if (announce) setStatus('罗马音标记已开启：拖选文字添加声调、连读或备注；单击字母间添加中断 /。');
+  } else {
+    closeAnnotationPopover();
+  }
+}
+
+romajiMarkupToggle?.addEventListener('change', () => setRomajiMarkupMode(romajiMarkupToggle.checked));
+document.addEventListener('pointerup', event => {
+  if (annotationPopover?.contains(event.target)) return;
+  setTimeout(captureRomajiSelection, 0);
+});
+document.addEventListener('keyup', event => {
+  if (event.key === 'Shift' || event.shiftKey) captureRomajiSelection();
+});
+window.addEventListener('resize', () => {
+  if (annotationAnchorRect && !annotationPopover?.hidden) positionAnnotationPopover(annotationAnchorRect);
+});
+window.visualViewport?.addEventListener('resize', () => {
+  if (annotationAnchorRect && !annotationPopover?.hidden) positionAnnotationPopover(annotationAnchorRect);
+});
+document.addEventListener('click', event => {
+  if (romajiMarkupToggle?.checked && event.target.closest('.romaji')) event.stopPropagation();
+}, true);
+
+$$('.annotation-type').forEach(button => {
+  button.addEventListener('click', () => setAnnotationType(button.dataset.annotationType));
+});
+$('#btn-close-annotation')?.addEventListener('click', () => closeAnnotationPopover());
+$('#btn-apply-annotation')?.addEventListener('click', () => {
+  if (!annotationSelection) return;
+  const note = annotationNoteInput?.value.trim() || '';
+  if (selectedAnnotationType === 'note' && !note) {
+    annotationNoteInput?.focus();
+    return;
+  }
+  const { key, text, sourceText, start, end } = annotationSelection;
+  const existing = romajiAnnotations[key] || [];
+  let next;
+  if (selectedAnnotationType === 'break') {
+    const position = end;
+    next = existing.filter(item => item.type !== 'break' || item.start !== position);
+    next.push({ start: position, end: position, type: 'break', note: '' });
+  } else {
+    if (end <= start) {
+      setStatus('请先拖选一段罗马音，再添加声调、连读或备注。', true);
+      return;
+    }
+    next = existing.filter(item => item.type === 'break' || item.end <= start || item.start >= end);
+    next.push({ start, end, type: selectedAnnotationType, note });
+  }
+  romajiAnnotations[key] = next;
+  saveRomajiAnnotations();
+  rerenderRomajiAnnotations(key, text, sourceText);
+  closeAnnotationPopover();
+  setStatus(selectedAnnotationType === 'break' ? '已添加中断 /。' : '罗马音标记已保存。');
+});
+$('#btn-remove-annotation')?.addEventListener('click', () => {
+  if (!annotationSelection) return;
+  const { key, text, sourceText, start, end } = annotationSelection;
+  const next = (romajiAnnotations[key] || []).filter(item => {
+    if (item.type === 'break') {
+      return end > start
+        ? item.start < start || item.start > end
+        : item.start !== start;
+    }
+    if (end <= start) return true;
+    return item.end <= start || item.start >= end;
+  });
+  if (next.length) romajiAnnotations[key] = next;
+  else delete romajiAnnotations[key];
+  saveRomajiAnnotations();
+  rerenderRomajiAnnotations(key, text, sourceText);
+  closeAnnotationPopover();
+  setStatus('所选范围内的标记已清除。');
 });
 
 $('#btn-toggle-panel').addEventListener('click', () => {
@@ -766,14 +1049,14 @@ async function renderLyrics(parsed) {
     const needsGeneratedRomaji = !ln.romaji || !hasWordSpacedRomaji(ln.romaji);
     if (ln.jpHTML && !needsGeneratedRomaji) {
       ln.el.querySelector('.jp').innerHTML = ln.jpHTML;
-      ln.el.querySelector('.romaji').textContent = ln.romaji || '';
+      renderRomajiText(ln.el.querySelector('.romaji'), ln.romaji || '', ln.text);
     } else {
       try {
         const { html, romaji } = await toFurigana(ln.text);
         if (!ln.jpHTML) ln.jpHTML = html;
         if (romaji) ln.romaji = romaji;
         ln.el.querySelector('.jp').innerHTML = ln.jpHTML || html || escapeHTML(ln.text);
-        ln.el.querySelector('.romaji').textContent = romaji || ln.romaji || '';
+        renderRomajiText(ln.el.querySelector('.romaji'), romaji || ln.romaji || '', ln.text);
       } catch (e) { /* ignore */ }
     }
     if (ln.zh) ln.el.querySelector('.zh').textContent = ln.zh;
@@ -1089,9 +1372,9 @@ async function renderStudyLines(sentences) {
     try {
       const { html, romaji } = await toFurigana(text);
       line.querySelector('.jp').innerHTML = html || escapeHTML(text);
-      line.querySelector('.romaji').textContent = romaji || '';
+      renderRomajiText(line.querySelector('.romaji'), romaji || '', text);
     } catch (e) {
-      line.querySelector('.romaji').textContent = kanaToRomajiSimple(kanaToHiragana(text));
+      renderRomajiText(line.querySelector('.romaji'), kanaToRomajiSimple(kanaToHiragana(text)), text);
     }
     if (i % 3 === 0) setStudyStatus(`转换中 ${i + 1}/${sentences.length}...`);
   }
@@ -1179,6 +1462,15 @@ const player = {
   timerReset() {
     this.timerOffset = 0;
     this.timerBase = performance.now();
+    updateTimerHud();
+  },
+  timerRestart() {
+    this.timerOffset = 0;
+    this.timerBase = performance.now();
+    if (!this.timerRunning) {
+      this.timerRunning = true;
+      setPanelCollapsed(true);
+    }
     updateTimerHud();
   },
   timerNudge(delta) {
@@ -1336,10 +1628,11 @@ function clearKaraokeProgress(el) {
   }
   const romaji = el?.querySelector('.romaji');
   if (romaji && romaji._karaokeText !== undefined) {
-    romaji.textContent = romaji._karaokeText;
+    const romajiText = romaji._karaokeText;
     romaji._karaokeText = undefined;
     romaji._karaokeBuilt = false;
     romaji._karaokeCharCount = 0;
+    renderRomajiText(romaji, romajiText, romaji.dataset.annotationSource || '');
   }
 }
 
@@ -1778,6 +2071,7 @@ function updateTimerHud() {
   hudToggle.textContent = player.timerRunning ? '⏸' : '▶';
 }
 hudToggle.addEventListener('click', () => player.timerToggle());
+$('#hud-restart').addEventListener('click', () => player.timerRestart());
 $('#hud-back').addEventListener('click', () => player.timerNudge(-0.5));
 $('#hud-fwd').addEventListener('click', () => player.timerNudge(+0.5));
 $('#btn-timer-start').addEventListener('click', () => {
@@ -1787,6 +2081,10 @@ $('#btn-timer-start').addEventListener('click', () => {
 $('#btn-timer-reset').addEventListener('click', () => {
   if (player.mode !== 'timer') switchToTimerMode();
   player.timerReset();
+});
+$('#btn-timer-restart').addEventListener('click', () => {
+  if (player.mode !== 'timer') switchToTimerMode();
+  player.timerRestart();
 });
 $('#btn-timer-back').addEventListener('click', () => player.timerNudge(-0.5));
 $('#btn-timer-fwd').addEventListener('click', () => player.timerNudge(+0.5));
@@ -2100,7 +2398,7 @@ async function applyKanogomaToCurrentLyrics(data) {
     }
     ln.zh = hit.zh;
     ln.el.querySelector('.jp').innerHTML = hit.jpHTML || escapeHTML(ln.text);
-    ln.el.querySelector('.romaji').textContent = ln.romaji || '';
+    renderRomajiText(ln.el.querySelector('.romaji'), ln.romaji || '', ln.text);
     ln.el.querySelector('.zh').textContent = hit.zh || '';
     applied++;
   }

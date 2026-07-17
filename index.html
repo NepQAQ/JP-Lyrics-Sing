@@ -47,9 +47,11 @@
       <button id="btn-export" class="icon-btn" aria-label="导出歌词" title="导出歌词">
         <span class="icon-btn-glyph" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 3V15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M7 10L12 15L17 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M5 19H19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="M12 3V15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+              stroke-linejoin="round" />
+            <path d="M7 10L12 15L17 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+              stroke-linejoin="round" />
+            <path d="M5 19H19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
           </svg>
         </span>
       </button>
@@ -134,6 +136,7 @@
       <div class="row">
         <button id="btn-timer-start" class="primary">▶ 开始 / 暂停</button>
         <button id="btn-timer-reset">⟲ 归零</button>
+        <button id="btn-timer-restart">⟳ 从头开始</button>
         <button id="btn-timer-back">« -0.5s</button>
         <button id="btn-timer-fwd">+0.5s »</button>
       </div>
@@ -173,6 +176,9 @@
       <label class="chip"><input type="checkbox" id="show-romaji" checked /><span>罗马音</span></label>
       <label class="chip"><input type="checkbox" id="show-zh" /><span>中文</span></label>
       <label class="chip"><input type="checkbox" id="auto-translate" /><span>自动翻译</span></label>
+      <label class="chip markup-mode-chip" title="开启后可拖选罗马音添加标记">
+        <input type="checkbox" id="enable-romaji-markup" /><span>标记罗马音</span>
+      </label>
     </div>
 
     <div id="status" class="status"></div>
@@ -225,10 +231,53 @@
     </div>
   </main>
 
+  <aside id="romaji-annotation-popover" class="annotation-popover glass" role="dialog"
+    aria-label="添加罗马音标记" hidden>
+    <div class="annotation-head">
+      <div>
+        <div class="popover-title">添加标记</div>
+        <div id="annotation-selection" class="annotation-selection"></div>
+      </div>
+      <button id="btn-close-annotation" class="icon-btn popover-close" type="button" aria-label="关闭标记工具"
+        title="关闭">×</button>
+    </div>
+    <div class="tone-types" role="radiogroup" aria-label="中文声调">
+      <button class="annotation-type tone-type" type="button" data-annotation-type="tone1" aria-pressed="false">
+        <span class="tone-number">1</span><span>一声</span><span class="tone-glyph">ˉ</span>
+      </button>
+      <button class="annotation-type tone-type" type="button" data-annotation-type="tone2" aria-pressed="false">
+        <span class="tone-number">2</span><span>二声</span><span class="tone-glyph">ˊ</span>
+      </button>
+      <button class="annotation-type tone-type" type="button" data-annotation-type="tone3" aria-pressed="false">
+        <span class="tone-number">3</span><span>三声</span><span class="tone-glyph">ˇ</span>
+      </button>
+      <button class="annotation-type tone-type" type="button" data-annotation-type="tone4" aria-pressed="false">
+        <span class="tone-number">4</span><span>四声</span><span class="tone-glyph">ˋ</span>
+      </button>
+    </div>
+    <div class="annotation-types" role="radiogroup" aria-label="其他标记">
+      <button class="annotation-type active" type="button" data-annotation-type="phrase" aria-pressed="true">
+        <span class="annotation-sample sample-phrase" aria-hidden="true">ab</span><span>连读</span>
+      </button>
+      <button class="annotation-type" type="button" data-annotation-type="break" aria-pressed="false">
+        <span class="annotation-sample sample-break" aria-hidden="true">a/b</span><span>中断</span>
+      </button>
+      <button class="annotation-type" type="button" data-annotation-type="note" aria-pressed="false">
+        <span class="annotation-sample sample-note" aria-hidden="true">ab</span><span>备注</span>
+      </button>
+    </div>
+    <input id="annotation-note" type="text" maxlength="18" placeholder="备注文字（选择“备注”时填写）" />
+    <div class="row annotation-actions">
+      <button id="btn-apply-annotation" class="primary" type="button">应用</button>
+      <button id="btn-remove-annotation" type="button">清除所选标记</button>
+    </div>
+  </aside>
+
   <div id="timer-hud" class="timer-hud" hidden>
     <span class="hud-dot"></span>
     <span id="timer-display">00:00.0</span>
     <button id="hud-toggle" class="hud-btn" title="开始/暂停">▶</button>
+    <button id="hud-restart" class="hud-btn" title="从头开始">⟳</button>
     <button id="hud-back" class="hud-btn" title="-0.5s">«</button>
     <button id="hud-fwd" class="hud-btn" title="+0.5s">»</button>
   </div>

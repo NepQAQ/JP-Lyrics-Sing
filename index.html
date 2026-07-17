@@ -42,14 +42,16 @@
       <button id="btn-mode" class="mode-btn" aria-label="切换跳唱/阅读模式" title="切换跳唱/阅读模式">
         <span class="mode-icon">🎤</span><span class="mode-text">跟唱</span>
       </button>
-      <button id="btn-overrides-panel" class="icon-btn" aria-label="读音修正" title="读音修正">
-        <span class="icon-btn-glyph icon-furigana" aria-hidden="true">
+      <button id="btn-search-history" class="icon-btn" aria-label="搜索历史" title="搜索历史" aria-haspopup="dialog"
+        aria-expanded="false">
+        <span class="icon-btn-glyph" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M5 8.5H11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-            <path d="M4 13H20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-            <path d="M4 17.5H14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-            <path d="M16.2 6.4L18.9 9.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-            <path d="M15.6 10L18.6 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            <path d="M3 12A9 9 0 1 0 6.1 5.2" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" />
+            <path d="M3 4.5V9H7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+              stroke-linejoin="round" />
+            <path d="M12 7.5V12L15 14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+              stroke-linejoin="round" />
           </svg>
         </span>
       </button>
@@ -89,20 +91,16 @@
     </button>
   </aside>
 
-  <aside id="overrides-popover" class="overrides-popover glass" hidden>
+  <aside id="search-history-popover" class="overrides-popover history-popover glass" role="dialog"
+    aria-labelledby="search-history-title" hidden>
     <div class="popover-head">
       <div>
-        <div class="popover-title">读音修正</div>
-        <div class="popover-subtitle">自定义词典</div>
+        <div id="search-history-title" class="popover-title">搜索历史</div>
+        <div class="popover-subtitle">本地缓存</div>
       </div>
-      <button id="btn-close-overrides" class="icon-btn popover-close" aria-label="关闭读音修正" title="关闭">×</button>
+      <button id="btn-close-search-history" class="icon-btn popover-close" aria-label="关闭搜索历史" title="关闭">×</button>
     </div>
-    <p class="hint-sm">每行一条 <code>汉字=假名</code>，可选 <code>汉字=假名|romaji</code>。例：<code>二人=ふたり|futari</code>。</p>
-    <textarea id="overrides-text" rows="7" placeholder="二人=ふたり|futari&#10;明日=あした&#10;# 以 # 开头的行会被忽略"></textarea>
-    <div class="row">
-      <button id="btn-save-overrides" class="primary">保存并应用</button>
-      <button id="btn-reload-lyrics">重新生成假名</button>
-    </div>
+    <div id="search-history-list" class="history-list"></div>
   </aside>
 
   <aside id="export-popover" class="overrides-popover glass" hidden>

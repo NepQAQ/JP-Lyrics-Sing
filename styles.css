@@ -273,6 +273,20 @@ body.app-study .brand-mode-btn { color: var(--accent); }
   flex: 0 0 auto;
 }
 .overrides-popover textarea { margin-top: 10px; }
+.history-popover {
+  width: min(460px, calc(100vw - 24px));
+}
+.history-list {
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+}
+.history-empty,
+.search-message {
+  padding: 14px 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.search-message.error { color: var(--danger); }
 
 /* ===== Romaji annotation editor ===== */
 .annotation-popover {

@@ -1898,6 +1898,7 @@ function cacheMatchesQuery(entry, q) {
 
 async function loadFromCache(entry) {
   searchResults.hidden = true;
+  setSearchHistoryOpen(false);
   $('#lrc-text').value = entry.lrc || '';
   const parsed = (entry.lines || []).map(l => ({
     time: l.time, text: l.text,
@@ -1910,6 +1911,73 @@ async function loadFromCache(entry) {
   if (!entry.lrc) switchToTimerMode();
 }
 
+function getCacheEntries(query = '') {
+  return Object.values(lyricsCache)
+    .filter(entry => !query || cacheMatchesQuery(entry, query))
+    .sort((a, b) => b.savedAt - a.savedAt);
+}
+
+function createCacheResult(entry) {
+  const div = document.createElement('div');
+  div.className = 'result-item';
+  div.innerHTML = `
+    <div class="title">${escapeHTML(entry.meta?.title || '(无标题)')} <span class="badge badge-cache">缓存</span></div>
+    <div class="meta">${escapeHTML(entry.meta?.artist || '')} · ${formatDur(entry.meta?.duration)} · ${new Date(entry.savedAt).toLocaleDateString()}</div>
+  `;
+  div.addEventListener('click', () => loadFromCache(entry));
+  return div;
+}
+
+function renderCacheResults(container, query = '') {
+  const entries = getCacheEntries(query);
+  if (!entries.length) return 0;
+  const head = document.createElement('div');
+  head.className = 'search-section-head';
+  head.textContent = '本地缓存（点击直接载入）';
+  container.appendChild(head);
+  entries.forEach(entry => container.appendChild(createCacheResult(entry)));
+  return entries.length;
+}
+
+function renderSearchHistory() {
+  const list = $('#search-history-list');
+  if (!list) return;
+  const entries = getCacheEntries();
+  list.replaceChildren();
+  if (!entries.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-empty';
+    empty.textContent = '暂无搜索历史';
+    list.appendChild(empty);
+    return;
+  }
+  entries.forEach(entry => list.appendChild(createCacheResult(entry)));
+}
+
+function setSearchHistoryOpen(open) {
+  const popover = $('#search-history-popover');
+  const btn = $('#btn-search-history');
+  if (!popover || !btn) return;
+  if (open) renderSearchHistory();
+  popover.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+}
+
+$('#btn-search-history')?.addEventListener('click', (event) => {
+  event.stopPropagation();
+  setSearchHistoryOpen($('#search-history-popover')?.hidden !== false);
+});
+$('#btn-close-search-history')?.addEventListener('click', () => setSearchHistoryOpen(false));
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') setSearchHistoryOpen(false);
+});
+document.addEventListener('click', (event) => {
+  const popover = $('#search-history-popover');
+  if (!popover || popover.hidden) return;
+  if (popover.contains(event.target) || $('#btn-search-history')?.contains(event.target)) return;
+  setSearchHistoryOpen(false);
+});
+
 async function doSearch() {
   const q = searchInput.value.trim();
   if (!q) return;
@@ -1917,59 +1985,39 @@ async function doSearch() {
   resetAssistActions();
   setStatus('搜索中...');
   searchResults.hidden = false;
-  searchResults.innerHTML = '<div style="padding:12px;color:var(--muted)">搜索中...</div>';
+  searchResults.replaceChildren();
+  renderCacheResults(searchResults, q);
+  const onlineResults = document.createElement('div');
+  onlineResults.className = 'online-search-results';
+  onlineResults.innerHTML = '<div class="search-section-head">LRCLIB 歌词结果</div><div class="search-message">搜索中...</div>';
+  searchResults.appendChild(onlineResults);
 
-  const lrclibPromise = fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`)
+  const data = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`)
     .then(r => r.json())
     .catch(e => { console.warn('[lrclib]', e); return { __error: e.message }; });
-  let data;
-  try {
-    data = await lrclibPromise;
-  } catch (e) {
-    if (requestId !== searchRequestId) return;
-    searchResults.innerHTML = `<div style="padding:12px;color:var(--danger)">搜索失败：${escapeHTML(e.message)}</div>`;
-    setStatus('搜索失败', true);
+  if (requestId !== searchRequestId) return;
+  onlineResults.replaceChildren();
+  const head = document.createElement('div');
+  head.className = 'search-section-head';
+  head.textContent = 'LRCLIB 歌词结果';
+  onlineResults.appendChild(head);
+
+  if (data?.__error) {
+    const error = document.createElement('div');
+    error.className = 'search-message error';
+    error.textContent = `搜索失败：${data.__error}`;
+    onlineResults.appendChild(error);
+    setStatus('LRCLIB 搜索失败，本地缓存仍可使用', true);
     return;
   }
 
   const lrcList = Array.isArray(data) ? data : [];
-  if (requestId !== searchRequestId) return;
-
-  searchResults.innerHTML = '';
-
-  // 本地缓存（搜索历史）：命中则可直接载入，无需重新联网
-  const cacheEntries = Object.values(lyricsCache)
-    .filter(entry => cacheMatchesQuery(entry, q))
-    .sort((a, b) => b.savedAt - a.savedAt);
-  if (cacheEntries.length) {
-    const cacheHead = document.createElement('div');
-    cacheHead.className = 'search-section-head';
-    cacheHead.textContent = '本地缓存（点击直接载入）';
-    searchResults.appendChild(cacheHead);
-    cacheEntries.forEach(entry => {
-      const div = document.createElement('div');
-      div.className = 'result-item';
-      div.innerHTML = `
-        <div class="title">${escapeHTML(entry.meta.title || '(无标题)')} <span class="badge badge-cache">缓存</span></div>
-        <div class="meta">${escapeHTML(entry.meta.artist || '')} · ${formatDur(entry.meta.duration)} · ${new Date(entry.savedAt).toLocaleDateString()}</div>
-      `;
-      div.addEventListener('click', () => loadFromCache(entry));
-      searchResults.appendChild(div);
-    });
-  }
-
   if (!lrcList.length) {
     const empty = document.createElement('div');
-    empty.style.padding = '12px';
-    empty.style.color = 'var(--muted)';
+    empty.className = 'search-message';
     empty.textContent = '未找到歌词。换个关键词试试？';
-    searchResults.appendChild(empty);
+    onlineResults.appendChild(empty);
   } else {
-    const head = document.createElement('div');
-    head.className = 'search-section-head';
-    head.textContent = '歌词结果';
-    searchResults.appendChild(head);
-
     lrcList.slice(0, 16).forEach(item => {
       const div = document.createElement('div');
       div.className = 'result-item';
@@ -1981,7 +2029,7 @@ async function doSearch() {
         <div class="meta">${escapeHTML(artist)} · ${escapeHTML(item.albumName || '')} · ${formatDur(item.duration)}</div>
       `;
       div.addEventListener('click', () => loadFromLrclib(item));
-      searchResults.appendChild(div);
+      onlineResults.appendChild(div);
     });
   }
 

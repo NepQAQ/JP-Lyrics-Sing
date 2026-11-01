@@ -21,6 +21,8 @@ const UPSTREAM_HEADERS = {
   'Referer': 'https://music.163.com/',
   'Accept': 'application/json, text/plain, */*',
   'Accept-Language': 'zh-CN,zh;q=0.9,ja;q=0.8,en;q=0.7',
+  // 网易云对无 Cookie 的请求更容易判定为异常，带上客户端标识可降低风控概率
+  'Cookie': 'appver=2.0.2; os=pc; NMTID=00O',
 };
 
 class ApiError extends Error {
@@ -116,9 +118,17 @@ async function handleSearch(request, url, env, ctx) {
     { q, limit },
     SEARCH_CACHE_TTL,
     async () => {
-      const results = await searchNetease(q, limit);
-      return { source: 'netease', query: q, count: results.length, results };
-    }
+      const { results, via, attempts } = await searchNetease(q, limit);
+      return {
+        source: 'netease',
+        query: q,
+        count: results.length,
+        results,
+        ...(via ? { via } : {}),
+        ...(results.length ? {} : { attempts }),
+      };
+    },
+    (data) => data.count > 0
   );
 
   return jsonResponse(
@@ -126,7 +136,8 @@ async function handleSearch(request, url, env, ctx) {
     {
       request,
       env,
-      cacheControl: `public, max-age=${SEARCH_CACHE_TTL}`,
+      // 空结果不允许被浏览器或边缘节点缓存，避免一次风控影响后续很久
+      cacheControl: cached.data?.count > 0 ? `public, max-age=${SEARCH_CACHE_TTL}` : 'no-store',
       headers: { 'X-Cache': cached.state },
     }
   );
@@ -165,9 +176,10 @@ async function handleLyric(request, url, env, ctx) {
       { q, limit: 10 },
       SEARCH_CACHE_TTL,
       async () => {
-        const results = await searchNetease(q, 10);
+        const { results } = await searchNetease(q, 10);
         return { results };
-      }
+      },
+      (data) => Array.isArray(data.results) && data.results.length > 0
     );
 
     target = pickBestCandidate(cachedSearch.data.results || [], title, artist, duration);
@@ -196,35 +208,118 @@ async function handleLyric(request, url, env, ctx) {
   );
 }
 
-async function searchNetease(query, limit) {
-  const api = new URL('https://music.163.com/api/search/get');
-  api.searchParams.set('s', query);
-  api.searchParams.set('type', '1');
-  api.searchParams.set('limit', String(limit));
-  api.searchParams.set('offset', '0');
+// 网易云搜索有多条等价入口，其中任一入口被风控或限流时空结果；
+// 依次尝试，任一返回歌曲即用，全部为空才判定为「没有结果」。
+const SEARCH_STRATEGIES = [
+  {
+    name: 'search/get',
+    url: (query, limit) => {
+      const api = new URL('https://music.163.com/api/search/get');
+      api.searchParams.set('s', query);
+      api.searchParams.set('type', '1');
+      api.searchParams.set('limit', String(limit));
+      api.searchParams.set('offset', '0');
+      api.searchParams.set('total', 'true');
+      return { url: api.toString(), method: 'GET' };
+    },
+  },
+  {
+    name: 'cloudsearch/pc',
+    url: (query, limit) => ({
+      url: 'https://music.163.com/api/cloudsearch/pc',
+      method: 'POST',
+      body: new URLSearchParams({
+        s: query,
+        type: '1',
+        limit: String(limit),
+        offset: '0',
+        total: 'true',
+      }).toString(),
+    }),
+  },
+  {
+    name: 'v1/search/get',
+    url: (query, limit) => {
+      const api = new URL('https://music.163.com/api/v1/search/get');
+      api.searchParams.set('s', query);
+      api.searchParams.set('type', '1');
+      api.searchParams.set('limit', String(limit));
+      api.searchParams.set('offset', '0');
+      return { url: api.toString(), method: 'GET' };
+    },
+  },
+  {
+    name: 'search/get(英文参数)',
+    url: (query, limit) => {
+      const api = new URL('https://music.163.com/api/search/get');
+      api.searchParams.set('s', query);
+      api.searchParams.set('type', '1');
+      api.searchParams.set('limit', String(limit));
+      api.searchParams.set('offset', '0');
+      api.searchParams.set('keyword', query);
+      return { url: api.toString(), method: 'GET' };
+    },
+  },
+];
 
-  const response = await fetchUpstream(api.toString());
-  if (!response.ok) {
-    throw new ApiError(502, 'UPSTREAM_SEARCH_FAILED', `网易云搜索返回 ${response.status}`);
+async function searchNetease(query, limit) {
+  const attempts = [];
+  let lastError = null;
+
+  for (const strategy of SEARCH_STRATEGIES) {
+    try {
+      const request = strategy.url(query, limit);
+      const init = {
+        method: request.method,
+        headers: request.body
+          ? { ...UPSTREAM_HEADERS, 'Content-Type': 'application/x-www-form-urlencoded' }
+          : UPSTREAM_HEADERS,
+        ...(request.body ? { body: request.body } : {}),
+      };
+      const response = await fetchUpstream(request.url, 0, init);
+      if (!response.ok) {
+        attempts.push({ via: strategy.name, status: response.status });
+        continue;
+      }
+      const data = await readJson(response, '网易云搜索返回了非 JSON 内容');
+      const songs = data?.result?.songs;
+      const code = data?.code ?? null;
+      if (!Array.isArray(songs) || !songs.length) {
+        attempts.push({ via: strategy.name, status: 200, code, count: 0 });
+        continue;
+      }
+      return {
+        via: strategy.name,
+        attempts,
+        results: songs
+          .map((song) => ({
+            id: Number(song?.id),
+            title: cleanText(song?.name || song?.title || ''),
+            artist: (Array.isArray(song?.artists)
+              ? song.artists
+              : Array.isArray(song?.ar)
+                ? song.ar
+                : []
+            )
+              .map((item) => cleanText(item?.name || ''))
+              .filter(Boolean)
+              .join(' / '),
+            album: cleanText(song?.album?.name || song?.al?.name || ''),
+            duration: Number(song?.duration || song?.dt || 0) || 0,
+          }))
+          .filter((song) => Number.isFinite(song.id) && song.id > 0),
+      };
+    } catch (error) {
+      lastError = error;
+      attempts.push({ via: strategy.name, error: error.message });
+    }
   }
 
-  const data = await readJson(response, '网易云搜索返回了非 JSON 内容');
-  const songs = data?.result?.songs;
+  if (attempts.every((item) => item.error)) {
+    throw lastError || new ApiError(502, 'UPSTREAM_SEARCH_FAILED', '网易云搜索全部入口失败');
+  }
 
-  if (!Array.isArray(songs)) return [];
-
-  return songs
-    .map((song) => ({
-      id: Number(song?.id),
-      title: cleanText(song?.name || song?.title || ''),
-      artist: (Array.isArray(song?.artists) ? song.artists : Array.isArray(song?.ar) ? song.ar : [])
-        .map((item) => cleanText(item?.name || ''))
-        .filter(Boolean)
-        .join(' / '),
-      album: cleanText(song?.album?.name || song?.al?.name || ''),
-      duration: Number(song?.duration || song?.dt || 0) || 0,
-    }))
-    .filter((song) => Number.isFinite(song.id) && song.id > 0);
+  return { via: null, attempts, results: [] };
 }
 
 async function fetchLyricData(target) {
@@ -492,7 +587,7 @@ function pickBestCandidate(candidates, title, artist, duration) {
   return best ? { ...best, matchScore: bestScore } : null;
 }
 
-async function fetchUpstream(url, retries = 1) {
+async function fetchUpstream(url, retries = 1, init = {}) {
   let lastError = null;
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -501,9 +596,11 @@ async function fetchUpstream(url, retries = 1) {
 
     try {
       const response = await fetch(url, {
-        headers: UPSTREAM_HEADERS,
+        method: init.method || 'GET',
+        headers: init.headers || UPSTREAM_HEADERS,
         signal: controller.signal,
         redirect: 'follow',
+        ...(init.body ? { body: init.body } : {}),
       });
       clearTimeout(timer);
 
@@ -542,7 +639,7 @@ async function readJson(response, message) {
   }
 }
 
-async function cachedJson(ctx, request, bucket, params, ttlSeconds, producer) {
+async function cachedJson(ctx, request, bucket, params, ttlSeconds, producer, shouldCache) {
   let cache = null;
   try {
     cache = caches.default;
@@ -561,7 +658,7 @@ async function cachedJson(ctx, request, bucket, params, ttlSeconds, producer) {
       keyUrl.searchParams.set(key, String(value));
     }
   }
-  keyUrl.searchParams.set('__cache', bucket);
+  keyUrl.searchParams.set('__cache', `${bucket}:v2`);
 
   const cacheKey = new Request(keyUrl.toString(), { method: 'GET' });
 
@@ -575,6 +672,11 @@ async function cachedJson(ctx, request, bucket, params, ttlSeconds, producer) {
   }
 
   const data = await producer();
+  // 空结果不进缓存：风控/限流导致的临时空返回不能被固化，
+  // 否则用户要等整个 TTL 过期才能重新搜到（历史上正是这样出现过「搜不到」）。
+  if (shouldCache && !shouldCache(data)) {
+    return { data, state: 'SKIP' };
+  }
   const stored = new Response(JSON.stringify(data), {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',

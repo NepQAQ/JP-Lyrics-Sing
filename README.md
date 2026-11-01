@@ -33,6 +33,7 @@
 | 服务 | 端点 | 用途 | CORS | 是否必须 |
 |------|------|------|------|----------|
 | [LRCLIB](https://lrclib.net/) | `GET https://lrclib.net/api/search` | 歌词搜索，返回多个候选结果（含行级时间轴、纯文本歌词、元数据） | 允许 | 是（主搜索入口） |
+| 网易云歌词代理（自建 Worker） | `GET {PROXY}/api/search`、`GET {PROXY}/api/lyric` | 网易云歌词：`yrc` 逐字时间轴、`tlyric` 人工中文翻译、`yromalrc` 罗马音 | 由 Worker 提供 | 否（不可用时自动回退 LRCLIB） |
 | [PetitLyrics](https://petitlyrics.com/) | `POST https://p0.petitlyrics.com/api/GetPetitLyricsData.php` | 获取 Type 3 逐字时间轴（每个字都有 starttime/endtime），用于 KTV 式渐变高亮 | 允许 (`*`) | 否（无数据时回退线性估算） |
 | [Kanogoma](https://kanogoma.com/) | `GET https://kanogoma.com/wp-json/wp/v2/song` | 搜索高质量日文注音歌词页面，获取带 ruby 注音的歌词、罗马音和中文翻译 | 需代理 | 否（补充来源） |
 | [Jina AI Reader](https://r.jina.ai/) | `GET https://r.jina.ai/{url}` | 作为 HTML 抓取代理，读取 Kanogoma 歌词页面内容 | 允许 | 否（仅 Kanogoma 功能依赖） |
@@ -79,6 +80,43 @@ LRCLIB API ──→ 返回多个候选（歌名/歌手/时间轴/歌词文本�
     │
     └──→ MyMemory API（按需）──→ 自动中文翻译
 ```
+
+## 网易云歌词源（自建 Cloudflare Worker）
+
+网易云的歌词接口不带 CORS 头，浏览器无法直接读取，因此本项目附带一个可选的轻量代理 `worker/`，部署在 Cloudflare Workers 上。部署一次后，访客无需任何配置。
+
+搜索时会同时请求「网易云歌词」与「LRCLIB」两个来源，先到先显示；网易云不可用时自动回退到 LRCLIB，不影响原有功能。
+
+网易云来源相对 LRCLIB 的优势：
+
+- `yrc` 逐字时间轴（不是每首歌都有，没有时回退到行级时间轴 + PetitLyrics 匹配）；
+- `tlyric` / `ytlrc` 人工中文翻译，与歌词行同源，天然对齐；
+- `yromalrc` 罗马音。
+
+前端默认指向已部署的代理地址，可用以下方式覆盖或关闭：
+
+```js
+// 浏览器控制台执行，改为本地调试用的 Worker
+localStorage.setItem('jplrc-proxy-base', 'http://127.0.0.1:8787');
+
+// 临时关闭网易云来源，只走 LRCLIB
+localStorage.setItem('jplrc-proxy-off', '1');
+
+// 恢复默认
+localStorage.removeItem('jplrc-proxy-base');
+localStorage.removeItem('jplrc-proxy-off');
+```
+
+自行部署 Worker：
+
+```bash
+cd worker
+npm install
+npx wrangler login
+npx wrangler deploy
+```
+
+部署后把 `wrangler.jsonc` 里的 `ALLOWED_ORIGINS` 改成你自己的站点域名（已默认允许 localhost 任意端口）。
 
 ## 快速开始
 

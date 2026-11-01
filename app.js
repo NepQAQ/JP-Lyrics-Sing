@@ -16,6 +16,42 @@ const searchResults = $('#search-results');
 const assistActions = $('#assist-actions');
 let searchRequestId = 0;
 let kanogomaSearchRequestId = 0;
+
+/* ---------------- 歌词源：网易云代理（Cloudflare Worker） ---------------- */
+// 默认使用已部署的代理；可用 localStorage 键 jplrc-proxy-base 覆盖（如本地 wrangler dev 的 http://127.0.0.1:8787）。
+// 用 jplrc-proxy-off=1 可临时关闭该来源，只走 LRCLIB。
+const LYRIC_PROXY_DEFAULT = 'https://jp-lyrics-proxy.nepqaq.workers.dev';
+function getLyricProxyBase() {
+  try {
+    const custom = (localStorage.getItem('jplrc-proxy-base') || '').trim();
+    if (custom) return custom.replace(/\/+$/, '');
+  } catch {}
+  return LYRIC_PROXY_DEFAULT;
+}
+function isNeteaseSourceEnabled() {
+  try { return localStorage.getItem('jplrc-proxy-off') !== '1'; } catch { return true; }
+}
+// 带超时的 JSON 请求：限流或线路不稳时不至于把整个搜索拖死
+async function fetchProxyJson(path, timeoutMs = 12000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const response = await fetch(getLyricProxyBase() + path, {
+      signal: ctrl.signal,
+      // 跳过浏览器 HTTP 缓存：代理侧已有自己的缓存策略，浏览器再缓存一次
+      // 会把一次临时的空结果固化下来，导致「明明有歌却搜不到」。
+      cache: 'no-store',
+    });
+    let data = null;
+    try { data = await response.json(); } catch {}
+    if (!response.ok) {
+      throw new Error(data?.error?.message || `HTTP ${response.status}`);
+    }
+    return data || {};
+  } finally {
+    clearTimeout(timer);
+  }
+}
 let latestKanogomaCandidates = [];
 let latestKanogomaQuery = '';
 
@@ -2055,6 +2091,87 @@ function buildLrclibSearchWaves(q) {
   return waves;
 }
 
+/* ---------------- 网易云歌词源（经 Cloudflare Worker） ---------------- */
+async function fetchNeteaseSearch(q, limit = 8) {
+  const data = await fetchProxyJson(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`, 9000);
+  return Array.isArray(data?.results) ? data.results : [];
+}
+
+// 把统一结构回写成 LRC 文本，便于编辑、导出与本地缓存
+function buildLrcFromParsed(parsed) {
+  return parsed
+    .filter(line => line.text)
+    .map(line => {
+      const total = Math.max(0, line.time);
+      const minutes = String(Math.floor(total / 60)).padStart(2, '0');
+      const seconds = (total % 60).toFixed(2).padStart(5, '0');
+      return `[${minutes}:${seconds}]${line.text}`;
+    })
+    .join('\n');
+}
+
+async function loadFromNetease(item) {
+  searchResults.hidden = true;
+  resetAssistActions();
+  setStatus(`正在从网易云载入：${item.title}${item.artist ? ' - ' + item.artist : ''}...`);
+
+  let data;
+  try {
+    data = await fetchProxyJson(`/api/lyric?id=${encodeURIComponent(item.id)}`, 15000);
+  } catch (e) {
+    setStatus(`网易云载入失败：${e.message}`, true);
+    return;
+  }
+
+  const rawLines = Array.isArray(data?.lines) ? data.lines : [];
+  if (!rawLines.length) {
+    setStatus('该结果没有可用歌词', true);
+    return;
+  }
+
+  // 统一结构直接对应 renderLyrics 需要的行结构；wordTiming 已是毫秒级 starttime/endtime
+  const parsed = rawLines.map(line => ({
+    time: Number(line.time) || 0,
+    text: line.text || '',
+    zh: line.zh || '',
+    romaji: line.romaji || '',
+    wordTiming: Array.isArray(line.wordTiming) && line.wordTiming.length ? line.wordTiming : null,
+  }));
+  const meta = {
+    id: `ne-${data.id || item.id}`,
+    trackName: data.title || item.title || '',
+    artistName: data.artist || item.artist || '',
+    albumName: data.album || item.album || '',
+    duration: data.duration || item.duration || 0,
+  };
+
+  const lrcText = buildLrcFromParsed(parsed);
+  $('#lrc-text').value = lrcText;
+  startAssistActionsForLyric(meta);
+  await renderLyrics(parsed);
+  setPanelCollapsed(true);
+
+  const wordLines = parsed.filter(line => line.wordTiming).length;
+  setStatus(
+    `已载入网易云：${meta.trackName}${meta.artistName ? ' - ' + meta.artistName : ''} · `
+    + (wordLines ? `逐字时间轴 ${wordLines}/${parsed.length} 行` : `逐行时间轴 ${parsed.length} 行`)
+  );
+  saveLyricsToCache(meta, lrcText);
+
+  // 没有逐字时间轴时，仍尝试用 PetitLyrics 补齐；同时后台预取 Kanogoma 注音候选
+  const tasks = [prefetchKanogomaCandidatesForLyric(meta)];
+  if (!wordLines) {
+    tasks.push((async () => {
+      const plLines = await fetchPetitLyricsWordTiming(meta.trackName, meta.artistName);
+      if (!plLines) return;
+      matchPetitLyricsToLrc(plLines, lrcLines);
+      const matched = lrcLines.filter(line => line.wordTiming).length;
+      if (matched) setStatus(`已载入：${meta.trackName} · PetitLyrics 逐字时间轴已匹配 ${matched}/${lrcLines.length} 行`);
+    })());
+  }
+  Promise.allSettled(tasks);
+}
+
 async function doSearch() {
   const q = searchInput.value.trim();
   if (!q) return;
@@ -2064,6 +2181,20 @@ async function doSearch() {
   searchResults.hidden = false;
   searchResults.replaceChildren();
   renderCacheResults(searchResults, q);
+
+  // 网易云分区：歌词质量最高（逐字时间轴 + 人工翻译），放在 LRCLIB 之前
+  const neteaseSection = document.createElement('div');
+  neteaseSection.className = 'online-search-results';
+  const neteaseHead = document.createElement('div');
+  neteaseHead.className = 'search-section-head';
+  neteaseHead.textContent = '网易云音乐歌词（含人工翻译）';
+  const neteaseMsg = document.createElement('div');
+  neteaseMsg.className = 'search-message';
+  neteaseMsg.textContent = '搜索中...';
+  const neteaseList = document.createElement('div');
+  neteaseSection.append(neteaseHead, neteaseMsg, neteaseList);
+  searchResults.appendChild(neteaseSection);
+
   const onlineResults = document.createElement('div');
   onlineResults.className = 'online-search-results';
   const resultsHead = document.createElement('div');
@@ -2075,6 +2206,38 @@ async function doSearch() {
   searchingMsg.textContent = '搜索中...';
   onlineResults.append(resultsHead, searchingMsg, resultsList);
   searchResults.appendChild(onlineResults);
+
+  // 网易云搜索与 LRCLIB 并行；先到先显示，任一路失败都不影响另一路
+  const neteaseTask = (async () => {
+    if (!isNeteaseSourceEnabled()) {
+      neteaseMsg.textContent = '已关闭网易云来源';
+      return;
+    }
+    try {
+      const results = await fetchNeteaseSearch(q, 8);
+      if (requestId !== searchRequestId) return;
+      neteaseList.replaceChildren();
+      if (!results.length) {
+        neteaseMsg.textContent = '网易云未找到匹配歌曲';
+        return;
+      }
+      neteaseMsg.hidden = true;
+      results.slice(0, 8).forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'result-item';
+        div.innerHTML = `
+          <div class="title">${escapeHTML(item.title || '(无标题)')} <span class="badge">网易云</span></div>
+          <div class="meta">${escapeHTML(item.artist || '')} · ${escapeHTML(item.album || '')} · ${formatDur((item.duration || 0) / 1000)}</div>
+        `;
+        div.addEventListener('click', () => loadFromNetease(item));
+        neteaseList.appendChild(div);
+      });
+    } catch (e) {
+      if (requestId !== searchRequestId) return;
+      neteaseMsg.textContent = `网易云暂不可用：${e.message}`;
+      neteaseMsg.classList.add('error');
+    }
+  })();
 
   // 结果到达即渲染（先到先显示），不等全部请求完成
   const seen = new Set();

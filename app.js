@@ -1604,6 +1604,7 @@ function buildKaraokeSpansPreservingRuby(el, text, parentEl) {
     tn.parentNode.replaceChild(frag, tn);
   }
   el._karaokeCharCount = count;
+  el._karaokeCharsDirty = true;
 }
 
 // 包裹所有文本字符为 karaoke span，同时保留 .romaji-mark / .romaji-break 标记结构
@@ -1628,6 +1629,7 @@ function buildKaraokeSpansPreservingMarks(el, text) {
     tn.parentNode.replaceChild(frag, tn);
   }
   el._karaokeCharCount = count;
+  el._karaokeCharsDirty = true;
 }
 
 function updateKaraokeProgress(t) {
@@ -1654,6 +1656,8 @@ function updateKaraokeProgress(t) {
     if (!line._plLogged) { line._plLogged = true; console.log('[KTV] 逐字模式:', line.text, '|', line.wordTiming.length, '字'); }
     const tMs = t * 1000;
     const totalChars = line.wordTiming.reduce((sum, w) => sum + w.text.length, 0);
+    // DOM 中实际 karaoke span 数（可能与 wordTiming 字符数不一致：部分匹配/多行合并/空格标点差异）
+    const domCharCount = jpEl._karaokeCharCount || plainText.length || totalChars;
     if (totalChars === 0) { sungChars = 0; }
     else {
       let completed = 0;
@@ -1669,36 +1673,51 @@ function updateKaraokeProgress(t) {
           break;
         }
       }
-      sungChars = completed;
+      // 修复：wordTiming 字符序列与 DOM karaoke span 序列长度不一致时（长行/合并行尤甚），
+      // 直接把 completed 当 DOM 索引用会导致高亮提前停滞或错位。
+      // 这里按进度比例映射到 DOM 字符数，保证高亮与播放进度同步。
+      sungChars = (completed / totalChars) * domCharCount;
     }
   } else {
     // 线性估算
     const lineStart = line.time;
     const lineEnd = activeIdx < lrcLines.length - 1
       ? lrcLines[activeIdx + 1].time
-      : lineStart + 5;
+      : lineStart + Math.max(5, (jpEl._karaokeCharCount || plainText.length || 0) / 3);
     const duration = Math.max(0.1, lineEnd - lineStart);
     const progress = Math.min(1, Math.max(0, (t - lineStart) / duration));
     sungChars = progress * (jpEl._karaokeCharCount || plainText.length);
   }
 
-  // 逐字符标记已唱/未唱
+  // 逐字符标记已唱/未唱（缓存 + 增量更新，长行时避免每帧全量遍历导致掉帧）
   const jpSungInt = Math.floor(sungChars);
-  const jpChars = jpEl.querySelectorAll('.karaoke-char');
-  jpChars.forEach((ch, i) => {
-    if (i < jpSungInt) ch.classList.add('karaoke-sung');
-    else ch.classList.remove('karaoke-sung');
-  });
+  applyKaraokeSung(jpEl, jpSungInt);
 
   // 罗马音同步
   if (romajiEl && romajiEl._karaokeCharCount) {
     const romajiSungInt = Math.floor((sungChars / (jpEl._karaokeCharCount || 1)) * romajiEl._karaokeCharCount);
-    const romajiChars = romajiEl.querySelectorAll('.karaoke-char');
-    romajiChars.forEach((ch, i) => {
-      if (i < romajiSungInt) ch.classList.add('karaoke-sung');
-      else ch.classList.remove('karaoke-sung');
-    });
+    applyKaraokeSung(romajiEl, romajiSungInt);
   }
+}
+
+// 按缓存的 span 列表增量更新已唱高亮：只处理 [last, sung) 之间变化的字符
+function applyKaraokeSung(el, sungInt) {
+  let chars = el._karaokeCharEls;
+  if (!chars || el._karaokeCharsDirty) {
+    chars = el._karaokeCharEls = Array.from(el.querySelectorAll('.karaoke-char'));
+    el._karaokeCharsDirty = false;
+    el._lastSungInt = -1;
+  }
+  const clamped = Math.max(0, Math.min(chars.length, sungInt));
+  const last = el._lastSungInt < 0 ? 0 : el._lastSungInt;
+  if (last === clamped) return;
+  const lo = Math.min(last, clamped);
+  const hi = Math.max(last, clamped);
+  for (let i = lo; i < hi; i++) {
+    if (i < clamped) chars[i].classList.add('karaoke-sung');
+    else chars[i].classList.remove('karaoke-sung');
+  }
+  el._lastSungInt = clamped;
 }
 
 function startKaraokeLoop() {
@@ -1723,6 +1742,9 @@ function clearKaraokeProgress(el) {
     jp._karaokeText = undefined;
     jp._karaokeBuilt = false;
     jp._karaokeCharCount = 0;
+    jp._karaokeCharsDirty = true;
+    jp._karaokeCharEls = null;
+    jp._lastSungInt = -1;
   }
   const romaji = el?.querySelector('.romaji');
   if (romaji && romaji._karaokeText !== undefined) {
@@ -1730,6 +1752,9 @@ function clearKaraokeProgress(el) {
     romaji._karaokeText = undefined;
     romaji._karaokeBuilt = false;
     romaji._karaokeCharCount = 0;
+    romaji._karaokeCharsDirty = true;
+    romaji._karaokeCharEls = null;
+    romaji._lastSungInt = -1;
     renderRomajiText(romaji, romajiText, romaji.dataset.annotationSource || '');
   }
 }
@@ -1978,6 +2003,58 @@ document.addEventListener('click', (event) => {
   setSearchHistoryOpen(false);
 });
 
+// LRCLIB 搜索请求：单次请求限时 8s（限流时服务器会拖慢响应），503/429 退避重试一次
+async function fetchLrclibSearch(params, { retries = 1, retryDelay = 500, timeout = 8000 } = {}) {
+  const url = new URL('https://lrclib.net/api/search');
+  for (const [k, v] of Object.entries(params)) {
+    if (v) url.searchParams.set(k, v);
+  }
+  let lastErr = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      const r = await fetch(url.toString(), { signal: controller.signal });
+      if (r.status === 503 || r.status === 429) {
+        // 服务器过载/限流，稍后重试
+        lastErr = new Error(`HTTP ${r.status}`);
+      } else if (!r.ok) {
+        return { __error: `HTTP ${r.status}` };
+      } else {
+        const data = await r.json();
+        return Array.isArray(data) ? data : [];
+      }
+    } catch (e) {
+      lastErr = e.name === 'AbortError' ? new Error('请求超时') : e;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (attempt < retries) {
+      await new Promise(res => setTimeout(res, retryDelay));
+    }
+  }
+  return { __error: lastErr?.message || '网络错误' };
+}
+
+// 搜索策略分两波：
+// 第一波（并行）：全文 q + 整句当 track_name —— 覆盖绝大多数场景，一轮往返即出结果
+// 第二波（并行）：「歌名 歌手」「歌手 歌名」拆分 —— 第一波结果不足时补充
+// LRCLIB 的 q 全文搜索对部分查询（如 "Bloody Stream"）会稳定 503，字段搜索是可靠兜底
+function buildLrclibSearchWaves(q) {
+  const waves = [[{ q }, { track_name: q }]];
+  const tokens = q.split(/\s+/).filter(Boolean);
+  if (tokens.length >= 2) {
+    const last = tokens[tokens.length - 1];
+    const rest = tokens.slice(0, -1).join(' ');
+    const first = tokens[0];
+    const after = tokens.slice(1).join(' ');
+    const secondWave = [{ track_name: rest, artist_name: last }];
+    if (after !== rest) secondWave.push({ track_name: after, artist_name: first });
+    waves.push(secondWave);
+  }
+  return waves;
+}
+
 async function doSearch() {
   const q = searchInput.value.trim();
   if (!q) return;
@@ -1989,36 +2066,25 @@ async function doSearch() {
   renderCacheResults(searchResults, q);
   const onlineResults = document.createElement('div');
   onlineResults.className = 'online-search-results';
-  onlineResults.innerHTML = '<div class="search-section-head">LRCLIB 歌词结果</div><div class="search-message">搜索中...</div>';
+  const resultsHead = document.createElement('div');
+  resultsHead.className = 'search-section-head';
+  resultsHead.textContent = 'LRCLIB 歌词结果';
+  const resultsList = document.createElement('div');
+  const searchingMsg = document.createElement('div');
+  searchingMsg.className = 'search-message';
+  searchingMsg.textContent = '搜索中...';
+  onlineResults.append(resultsHead, searchingMsg, resultsList);
   searchResults.appendChild(onlineResults);
 
-  const data = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`)
-    .then(r => r.json())
-    .catch(e => { console.warn('[lrclib]', e); return { __error: e.message }; });
-  if (requestId !== searchRequestId) return;
-  onlineResults.replaceChildren();
-  const head = document.createElement('div');
-  head.className = 'search-section-head';
-  head.textContent = 'LRCLIB 歌词结果';
-  onlineResults.appendChild(head);
-
-  if (data?.__error) {
-    const error = document.createElement('div');
-    error.className = 'search-message error';
-    error.textContent = `搜索失败：${data.__error}`;
-    onlineResults.appendChild(error);
-    setStatus('LRCLIB 搜索失败，本地缓存仍可使用', true);
-    return;
-  }
-
-  const lrcList = Array.isArray(data) ? data : [];
-  if (!lrcList.length) {
-    const empty = document.createElement('div');
-    empty.className = 'search-message';
-    empty.textContent = '未找到歌词。换个关键词试试？';
-    onlineResults.appendChild(empty);
-  } else {
-    lrcList.slice(0, 16).forEach(item => {
+  // 结果到达即渲染（先到先显示），不等全部请求完成
+  const seen = new Set();
+  const merged = [];
+  let lastError = null;
+  let anySuccess = false;
+  const renderMerged = () => {
+    if (requestId !== searchRequestId) return;
+    resultsList.replaceChildren();
+    merged.slice(0, 16).forEach(item => {
       const div = document.createElement('div');
       div.className = 'result-item';
       const synced = !!item.syncedLyrics;
@@ -2029,11 +2095,58 @@ async function doSearch() {
         <div class="meta">${escapeHTML(artist)} · ${escapeHTML(item.albumName || '')} · ${formatDur(item.duration)}</div>
       `;
       div.addEventListener('click', () => loadFromLrclib(item));
-      onlineResults.appendChild(div);
+      resultsList.appendChild(div);
     });
+    searchingMsg.hidden = merged.length > 0;
+    setStatus(merged.length ? `找到 ${merged.length} 条歌词` : '搜索中...');
+  };
+  const absorb = (data) => {
+    if (requestId !== searchRequestId) return;
+    if (Array.isArray(data)) {
+      anySuccess = true;
+      for (const item of data) {
+        const key = `${item.trackName}||${item.artistName}||${item.duration}`;
+        if (!seen.has(key)) { seen.add(key); merged.push(item); }
+      }
+    } else {
+      lastError = data?.__error || lastError;
+    }
+  };
+
+  // 按波次并行请求：波内并发、各自完成后立即渲染；结果足够即不再发起下一波
+  const waves = buildLrclibSearchWaves(q);
+  for (const wave of waves) {
+    await new Promise(resolve => {
+      let pending = wave.length;
+      for (const s of wave) {
+        fetchLrclibSearch(s)
+          .then(data => { absorb(data); renderMerged(); })
+          .finally(() => { if (--pending === 0) resolve(); });
+      }
+    });
+    if (requestId !== searchRequestId) return;
+    if (merged.length >= 5) break;
   }
 
-  setStatus(lrcList.length ? `找到 ${lrcList.length} 条歌词` : '未找到歌词');
+  if (requestId !== searchRequestId) return;
+  searchingMsg.hidden = true;
+  if (!merged.length && lastError && !anySuccess) {
+    const error = document.createElement('div');
+    error.className = 'search-message error';
+    error.textContent = `搜索失败：${lastError}`;
+    resultsList.appendChild(error);
+    setStatus('LRCLIB 搜索失败，本地缓存仍可使用', true);
+    return;
+  }
+  if (!merged.length) {
+    const empty = document.createElement('div');
+    empty.className = 'search-message';
+    empty.textContent = '未找到歌词。换个关键词试试？';
+    resultsList.appendChild(empty);
+    setStatus('未找到歌词');
+  } else {
+    setStatus(`找到 ${merged.length} 条歌词`);
+  }
 }
 
 function stripHTML(s) {

@@ -896,6 +896,10 @@ button.primary:hover { filter: brightness(1.08); }
 body:not(.mode-read) .lrc-line.active .jp {
   color: var(--text-strong);
 }
+/* 字符变色平滑过渡，避免逐字高亮时的生硬跳变 */
+body:not(.mode-read) .lrc-line.active .jp .karaoke-char {
+  transition: color 0.35s ease, text-shadow 0.35s ease;
+}
 body:not(.mode-read) .lrc-line.active .jp .karaoke-sung {
   color: var(--active);
   text-shadow: 0 2px 18px color-mix(in srgb, var(--active) 40%, transparent);
@@ -907,6 +911,9 @@ body:not(.mode-read) .lrc-line.active .jp rt {
 /* KTV karaoke effect for romaji */
 body:not(.mode-read) .lrc-line.active .romaji {
   color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+body:not(.mode-read) .lrc-line.active .romaji .karaoke-char {
+  transition: color 0.35s ease;
 }
 body:not(.mode-read) .lrc-line.active .romaji .karaoke-sung {
   color: var(--active);

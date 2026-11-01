@@ -555,6 +555,40 @@ button.primary:hover { filter: brightness(1.08); }
   gap: 8px;
   flex-wrap: wrap;
 }
+/* Jina API Key 输入行：低调的小字辅助配置 */
+.jina-key-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+#jina-key-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  padding: 5px 10px;
+  border: 1px solid var(--line, rgba(0, 0, 0, 0.08));
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--text-muted, #888);
+  outline: none;
+}
+#jina-key-input:focus {
+  border-color: var(--accent, #7c8cf8);
+}
+.jina-key-save {
+  font-size: 11px;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent, #7c8cf8);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.jina-key-save:hover {
+  opacity: 0.85;
+}
 .assist-btn {
   flex: 1 1 220px;
   min-width: 0;

@@ -2470,12 +2470,66 @@ function kanogomaBuildSearchUrl(query) {
   return u.toString();
 }
 
+const JINA_KEY_STORAGE = 'jplrc-jina-key';
+function getJinaApiKey() { return localStorage.getItem(JINA_KEY_STORAGE) || ''; }
+
+function fetchWithTimeout(url, options = {}, timeout = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+}
+
+// 抓取 Kanogoma 歌词页：HTML 页无 CORS 头必须走代理，多通道自动切换。
+// Jina Reader 免 key 已要求认证（401），可在补充来源卡片填入免费 API key 走稳定通道。
 async function kanogomaFetchHtml(url) {
-  const response = await fetch('https://r.jina.ai/' + url, {
-    headers: { 'X-Return-Format': 'html' }
+  const jinaKey = getJinaApiKey();
+  const attempts = [
+    {
+      name: 'Jina Reader',
+      run: () => fetchWithTimeout('https://r.jina.ai/' + url, {
+        headers: {
+          'X-Return-Format': 'html',
+          ...(jinaKey ? { Authorization: `Bearer ${jinaKey}` } : {}),
+        },
+      }),
+    },
+    {
+      name: 'AllOrigins',
+      run: () => fetchWithTimeout('https://api.allorigins.win/raw?url=' + encodeURIComponent(url)),
+    },
+    {
+      name: 'CodeTabs',
+      run: () => fetchWithTimeout('https://api.codetabs.com/v1/proxy?quest=' + url),
+    },
+  ];
+  let lastError = null;
+  for (const attempt of attempts) {
+    try {
+      const response = await attempt.run();
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const html = await response.text();
+      // 校验返回的是真正的歌词页（代理可能返回错误页/验证页）
+      if (html && html.includes('id="kngm"')) return html;
+      throw new Error('返回内容不是歌词页');
+    } catch (e) {
+      console.warn(`[Kanogoma] ${attempt.name} 失败:`, e.message);
+      lastError = new Error(`${attempt.name}: ${e.message}`);
+    }
+  }
+  throw new Error(lastError ? lastError.message : '所有抓取通道均失败');
+}
+
+// Jina API Key 配置：存在 localStorage，保存后下次 Kanogoma 载入生效
+const jinaKeyInput = $('#jina-key-input');
+if (jinaKeyInput) {
+  jinaKeyInput.value = getJinaApiKey();
+  $('#btn-save-jina-key')?.addEventListener('click', () => {
+    const key = jinaKeyInput.value.trim();
+    if (key) localStorage.setItem(JINA_KEY_STORAGE, key);
+    else localStorage.removeItem(JINA_KEY_STORAGE);
+    setStatus(key ? 'Jina API Key 已保存，点击「应用 Kanogoma 注音」重试即可' : '已清除 Jina API Key');
   });
-  if (!response.ok) throw new Error('网络错误 ' + response.status);
-  return await response.text();
 }
 
 const RE_KANJI = /[\u3400-\u9fff々ヶ]/;
@@ -2791,7 +2845,10 @@ async function loadFromKanogoma(item) {
       setStatus(`Kanogoma ✓ 已显示歌词、注音、罗马音和中文翻译（无时间轴，请使用计时模式）。`);
     }
   } catch (e) {
-    setStatus('Kanogoma 载入失败：' + e.message, true);
+    const hint = getJinaApiKey()
+      ? ''
+      : '（可在上方填入 Jina 免费 API Key 后重试，或稍后再试）';
+    setStatus(`Kanogoma 载入失败：${e.message}${hint}`, true);
   }
 }
 

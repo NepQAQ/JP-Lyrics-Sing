@@ -125,13 +125,22 @@
   </aside>
 
   <section id="panel" class="panel glass">
-    <div class="row search-row">
+    <form class="row search-row" id="search-form" role="search" autocomplete="off">
       <div class="search-box">
         <span class="search-icon">🔍</span>
-        <input id="search-input" type="search" placeholder="搜索歌曲（如：夜に駆ける YOASOBI）" />
+        <input
+          id="search-input"
+          type="search"
+          placeholder="搜索歌曲（如：夜に駆ける YOASOBI）"
+          enterkeyhint="search"
+          autocomplete="off"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck="false"
+        />
       </div>
-      <button id="btn-search" class="primary">搜索歌词</button>
-    </div>
+      <button id="btn-search" class="primary" type="submit">搜索歌词</button>
+    </form>
     <div id="search-results" class="search-results" hidden></div>
     <div id="assist-actions" class="assist-actions glass" hidden>
       <div class="assist-actions-head">

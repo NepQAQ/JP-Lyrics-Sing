@@ -1890,10 +1890,30 @@ async function loadLrcFromText(text) {
 }
 
 /* ---------------- Online search via lrclib.net ---------------- */
-$('#btn-search').addEventListener('click', doSearch);
-searchInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') doSearch();
+// 移动端输入法组词时，keydown 的 Enter 会被 keyCode 229 吞掉，导致「按了搜索键却没反应」，
+// 结果停留在上一次搜索（看起来就像搜索结果乱跳）。统一改走表单提交：
+// 按钮点击、桌面回车、手机键盘的「搜索」键都会触发 submit。
+const searchForm = $('#search-form');
+searchForm?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (searchInput.dataset.composing === '1') return;
+  searchInput.blur();
+  doSearch();
 });
+searchInput.addEventListener('compositionstart', () => {
+  searchInput.dataset.composing = '1';
+});
+searchInput.addEventListener('compositionend', () => {
+  delete searchInput.dataset.composing;
+});
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  if (searchForm?.requestSubmit) searchForm.requestSubmit();
+  else doSearch();
+});
+// 部分手机浏览器按键盘「搜索」键只派发 search 事件，不触发表单提交
+searchInput.addEventListener('search', () => doSearch());
 
 /* ---------------- Local lyrics cache (search history) ---------------- */
 const LYRICS_CACHE_KEY = 'jplrc-lyrics-cache';
@@ -2093,8 +2113,24 @@ function buildLrclibSearchWaves(q) {
 
 /* ---------------- 网易云歌词源（经 Cloudflare Worker） ---------------- */
 async function fetchNeteaseSearch(q, limit = 8) {
-  const data = await fetchProxyJson(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`, 9000);
-  return Array.isArray(data?.results) ? data.results : [];
+  const buildPath = (bust) =>
+    `/api/search?q=${encodeURIComponent(q)}&limit=${limit}${bust ? `&_t=${Date.now()}` : ''}`;
+  const norm = (s) => String(s ?? '').trim().toLowerCase();
+  const demoji = (data) => (Array.isArray(data?.results) ? data.results : []);
+
+  let data = await fetchProxyJson(buildPath(false), 9000);
+  let results = demoji(data);
+
+  // 代理侧或中间链路偶发用错缓存（返回别的关键词结果）时，带时间戳绕过缓存重取一次
+  if (data?.query != null && norm(data.query) !== norm(q)) {
+    data = await fetchProxyJson(buildPath(true), 9000);
+    results = demoji(data);
+    if (data?.query != null && norm(data.query) !== norm(q)) {
+      throw new Error('返回结果与关键词不一致，请再点一次搜索');
+    }
+  }
+
+  return results;
 }
 
 // 把统一结构回写成 LRC 文本，便于编辑、导出与本地缓存
@@ -2172,9 +2208,15 @@ async function loadFromNetease(item) {
   Promise.allSettled(tasks);
 }
 
+let lastSearch = { q: '', at: 0 };
+
 async function doSearch() {
   const q = searchInput.value.trim();
   if (!q) return;
+  // 表单提交与 search 事件可能同时触发，短时间内同一个关键词只搜一次
+  const now = Date.now();
+  if (q === lastSearch.q && now - lastSearch.at < 600) return;
+  lastSearch = { q, at: now };
   const requestId = ++searchRequestId;
   resetAssistActions();
   setStatus('搜索中...');
@@ -2187,7 +2229,8 @@ async function doSearch() {
   neteaseSection.className = 'online-search-results';
   const neteaseHead = document.createElement('div');
   neteaseHead.className = 'search-section-head';
-  neteaseHead.textContent = '网易云音乐歌词（含人工翻译）';
+  neteaseHead.textContent =
+    `网易云音乐歌词（含人工翻译）· ${q.length > 24 ? q.slice(0, 24) + '…' : q}`;
   const neteaseMsg = document.createElement('div');
   neteaseMsg.className = 'search-message';
   neteaseMsg.textContent = '搜索中...';

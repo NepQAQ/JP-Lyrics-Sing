@@ -17,10 +17,22 @@ const assistActions = $('#assist-actions');
 let searchRequestId = 0;
 let kanogomaSearchRequestId = 0;
 
-/* ---------------- 歌词源：网易云代理（Cloudflare Worker） ---------------- */
-// 默认使用已部署的代理；可用 localStorage 键 jplrc-proxy-base 覆盖（如本地 wrangler dev 的 http://127.0.0.1:8787）。
+/* ---------------- 歌词源：网易云代理（Cloudflare Pages Functions / Worker） ---------------- */
+// 主部署（Cloudflare Pages）下接口与站点同域（functions/api/[[route]].js），直接走相对路径；
+// GitHub Pages 与本地开发没有同域 Functions，回落到独立部署的 Worker（workers.dev）。
+// 可用 localStorage 键 jplrc-proxy-base 覆盖（如本地 wrangler dev 的 http://127.0.0.1:8787）。
 // 用 jplrc-proxy-off=1 可临时关闭该来源，只走 LRCLIB。
-const LYRIC_PROXY_DEFAULT = 'https://jp-lyrics-proxy.nepqaq.workers.dev';
+const LYRIC_PROXY_FALLBACK = 'https://jp-lyrics-proxy.nepqaq.workers.dev';
+const LYRIC_PROXY_DEFAULT = (() => {
+  try {
+    const host = location.hostname;
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '';
+    const isGithubPages = /\.github\.io$/i.test(host);
+    return (isLocal || isGithubPages) ? LYRIC_PROXY_FALLBACK : '';
+  } catch {
+    return LYRIC_PROXY_FALLBACK;
+  }
+})();
 function getLyricProxyBase() {
   try {
     const custom = (localStorage.getItem('jplrc-proxy-base') || '').trim();

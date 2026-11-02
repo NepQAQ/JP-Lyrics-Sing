@@ -15,7 +15,7 @@ const searchInput = $('#search-input');
 const searchResults = $('#search-results');
 const assistActions = $('#assist-actions');
 let searchRequestId = 0;
-let kanogomaSearchRequestId = 0;
+let marumaruSearchRequestId = 0;
 
 /* ---------------- 歌词源：网易云代理（Cloudflare Pages Functions / Worker） ---------------- */
 // 主部署（Cloudflare Pages）下接口与站点同域（functions/api/[[route]].js），直接走相对路径；
@@ -64,8 +64,7 @@ async function fetchProxyJson(path, timeoutMs = 12000) {
     clearTimeout(timer);
   }
 }
-let latestKanogomaCandidates = [];
-let latestKanogomaQuery = '';
+let latestMarumaruCandidates = [];
 
 let kuroshiro = null;
 let kuroshiroReady = null;
@@ -75,7 +74,7 @@ let translationCache = new Map();
 const assistSearchState = {
   title: '',
   artist: '',
-  kanogoma: { status: 'idle', message: '', count: 0 },
+  marumaru: { status: 'idle', message: '', count: 0 },
 };
 
 /* ---------------- Theme ---------------- */
@@ -207,19 +206,18 @@ function setStudyStatus(msg, isError = false) {
 }
 
 function resetAssistActions() {
-  kanogomaSearchRequestId++;
-  latestKanogomaCandidates = [];
-  latestKanogomaQuery = '';
+  marumaruSearchRequestId++;
+  latestMarumaruCandidates = [];
   assistSearchState.title = '';
   assistSearchState.artist = '';
-  assistSearchState.kanogoma = { status: 'idle', message: '', count: 0 };
+  assistSearchState.marumaru = { status: 'idle', message: '', count: 0 };
   renderAssistActions();
 }
 
 function startAssistActionsForLyric(item) {
   assistSearchState.title = item?.trackName || '';
   assistSearchState.artist = item?.artistName || '';
-  assistSearchState.kanogoma = { status: 'loading', message: '', count: 0 };
+  assistSearchState.marumaru = { status: 'loading', message: '', count: 0 };
   renderAssistActions();
 }
 
@@ -242,27 +240,27 @@ function applyAssistButtonState(button, state, labels) {
 function renderAssistActions() {
   if (!assistActions) return;
   const meta = $('#assist-actions-meta');
-  const kanogomaBtn = $('#btn-apply-kanogoma');
+  const marumaruBtn = $('#btn-apply-marumaru');
   const hasContext = !!(
     assistSearchState.title
     || assistSearchState.artist
-    || assistSearchState.kanogoma.status !== 'idle'
+    || assistSearchState.marumaru.status !== 'idle'
   );
   assistActions.hidden = !hasContext;
-  if (!hasContext || !meta || !kanogomaBtn) return;
+  if (!hasContext || !meta || !marumaruBtn) return;
 
   const label = [assistSearchState.title, assistSearchState.artist].filter(Boolean).join(' · ') || '当前歌词';
-  meta.textContent = `${label} · Kanogoma${formatAssistState(assistSearchState.kanogoma)}`;
+  meta.textContent = `${label} · Marumaru${formatAssistState(assistSearchState.marumaru)}`;
 
-  applyAssistButtonState(kanogomaBtn, assistSearchState.kanogoma, {
-    idle: 'Kanogoma 待命',
-    loading: 'Kanogoma 搜索中...',
-    ready: assistSearchState.kanogoma.count > 1 ? `应用 Kanogoma 注音 (${assistSearchState.kanogoma.count})` : '应用 Kanogoma 注音',
-    empty: 'Kanogoma 未找到',
-    error: 'Kanogoma 暂不可用',
+  applyAssistButtonState(marumaruBtn, assistSearchState.marumaru, {
+    idle: 'Marumaru 待命',
+    loading: 'Marumaru 搜索中...',
+    ready: assistSearchState.marumaru.count > 1 ? `应用 Marumaru 注音 (${assistSearchState.marumaru.count})` : '应用 Marumaru 注音',
+    empty: 'Marumaru 未找到',
+    error: 'Marumaru 暂不可用',
   });
-  kanogomaBtn.title = latestKanogomaCandidates[0]
-    ? `将优先应用：${latestKanogomaCandidates[0].title}${latestKanogomaCandidates[0].artist ? ` - ${latestKanogomaCandidates[0].artist}` : ''}`
+  marumaruBtn.title = latestMarumaruCandidates[0]
+    ? `将优先应用：${latestMarumaruCandidates[0].title}${latestMarumaruCandidates[0].artist ? ` - ${latestMarumaruCandidates[0].artist}` : ''}`
     : '';
 }
 
@@ -2220,8 +2218,9 @@ async function loadFromNetease(item) {
   );
   saveLyricsToCache(meta, lrcText);
 
-  // 没有逐字时间轴时，仍尝试用 PetitLyrics 补齐；同时后台预取 Kanogoma 注音候选
-  const tasks = [prefetchKanogomaCandidatesForLyric(meta)];
+  // 没有逐字时间轴时，仍尝试用 PetitLyrics 补齐；同时后台预取 Marumaru 注音候选。
+  // 网易云自带中文翻译，仅当歌词缺翻译时才自动应用 Marumaru 补充。
+  const tasks = [prefetchMarumaruCandidatesForLyric(meta, { autoApply: !parsed.some(line => line.zh) })];
   if (!wordLines) {
     tasks.push((async () => {
       const plLines = await fetchPetitLyricsWordTiming(meta.trackName, meta.artistName);
@@ -2236,6 +2235,30 @@ async function loadFromNetease(item) {
 
 let lastSearch = { q: '', at: 0 };
 
+/* ---------------- 搜索源分栏（缓存 / 网易云 / LRCLIB） ---------------- */
+const SEARCH_SOURCES = ['cache', 'netease', 'lrclib'];
+const SEARCH_SOURCE_LABELS = { cache: '缓存', netease: '网易云', lrclib: 'LRCLIB' };
+
+function setSearchSourceDot(src, state) {
+  const dot = searchResults.querySelector(`.search-source-tab[data-src="${src}"] .src-dot`);
+  if (dot) dot.dataset.state = state;
+}
+
+function activateSearchSource(src) {
+  searchResults.querySelectorAll('.search-source-tab').forEach(tab => {
+    const active = tab.dataset.src === src;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', String(active));
+  });
+  searchResults.querySelectorAll('.search-source-pane').forEach(pane => {
+    pane.hidden = pane.dataset.pane !== src;
+  });
+}
+
+function currentSearchSource() {
+  return searchResults.querySelector('.search-source-tab.active')?.dataset.src || '';
+}
+
 async function doSearch() {
   const q = searchInput.value.trim();
   if (!q) return;
@@ -2248,46 +2271,90 @@ async function doSearch() {
   setStatus('搜索中...');
   searchResults.hidden = false;
   searchResults.replaceChildren();
-  renderCacheResults(searchResults, q);
 
-  // 网易云分区：歌词质量最高（逐字时间轴 + 人工翻译），放在 LRCLIB 之前
-  const neteaseSection = document.createElement('div');
-  neteaseSection.className = 'online-search-results';
-  const neteaseHead = document.createElement('div');
-  neteaseHead.className = 'search-section-head';
-  neteaseHead.textContent =
-    `网易云音乐歌词（含人工翻译）· ${q.length > 24 ? q.slice(0, 24) + '…' : q}`;
+  // 搜索框下方的源 tab：tab 前的小圆点标记各源状态（绿点 = 已出结果）
+  const tabs = document.createElement('div');
+  tabs.className = 'search-source-tabs';
+  tabs.setAttribute('role', 'tablist');
+  const panes = {};
+  for (const src of SEARCH_SOURCES) {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'search-source-tab';
+    tab.dataset.src = src;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', 'false');
+    tab.innerHTML = `<span class="src-dot" data-state="idle" aria-hidden="true"></span>${SEARCH_SOURCE_LABELS[src]}`;
+    tab.addEventListener('click', () => activateSearchSource(src));
+    tabs.appendChild(tab);
+    const pane = document.createElement('div');
+    pane.className = 'search-source-pane';
+    pane.dataset.pane = src;
+    pane.hidden = true;
+    panes[src] = pane;
+    searchResults.appendChild(pane);
+  }
+  searchResults.prepend(tabs);
+
+  // 本地缓存即时可得
+  const cacheCount = renderCacheResults(panes.cache, q);
+  const counts = { cache: cacheCount, netease: 0, lrclib: 0 };
+  const finished = { cache: true, netease: false, lrclib: false };
+  setSearchSourceDot('cache', cacheCount ? 'done' : 'empty');
+  activateSearchSource('netease');
+
+  const updateStatusSummary = () => {
+    if (requestId !== searchRequestId) return;
+    const parts = SEARCH_SOURCES.filter(src => finished[src]).map(src => `${SEARCH_SOURCE_LABELS[src]} ${counts[src]} 条`);
+    setStatus(parts.length ? parts.join(' · ') : '搜索中...');
+  };
+
+  // 某一路出结果/结束时：更新圆点；若当前分栏没有任何结果而已完成的源有结果，自动切换过去
+  const settle = (src, dotState) => {
+    finished[src] = true;
+    setSearchSourceDot(src, dotState || (counts[src] > 0 ? 'done' : 'empty'));
+    updateStatusSummary();
+    const active = currentSearchSource();
+    if (counts[active] === 0 && finished[active]) {
+      const better = SEARCH_SOURCES.find(s => counts[s] > 0);
+      if (better && better !== active) activateSearchSource(better);
+    }
+  };
+  updateStatusSummary();
+
   const neteaseMsg = document.createElement('div');
   neteaseMsg.className = 'search-message';
   neteaseMsg.textContent = '搜索中...';
-  const neteaseList = document.createElement('div');
-  neteaseSection.append(neteaseHead, neteaseMsg, neteaseList);
-  searchResults.appendChild(neteaseSection);
+  panes.netease.appendChild(neteaseMsg);
+  const neteaseHead = document.createElement('div');
+  neteaseHead.className = 'search-section-head';
+  neteaseHead.textContent = `网易云音乐歌词（含人工翻译）· ${q.length > 24 ? q.slice(0, 24) + '…' : q}`;
+  panes.netease.prepend(neteaseHead);
 
-  const onlineResults = document.createElement('div');
-  onlineResults.className = 'online-search-results';
-  const resultsHead = document.createElement('div');
-  resultsHead.className = 'search-section-head';
-  resultsHead.textContent = 'LRCLIB 歌词结果';
-  const resultsList = document.createElement('div');
-  const searchingMsg = document.createElement('div');
-  searchingMsg.className = 'search-message';
-  searchingMsg.textContent = '搜索中...';
-  onlineResults.append(resultsHead, searchingMsg, resultsList);
-  searchResults.appendChild(onlineResults);
+  const lrclibHead = document.createElement('div');
+  lrclibHead.className = 'search-section-head';
+  lrclibHead.textContent = 'LRCLIB 歌词结果';
+  const lrclibMsg = document.createElement('div');
+  lrclibMsg.className = 'search-message';
+  lrclibMsg.textContent = '搜索中...';
+  const lrclibList = document.createElement('div');
+  panes.lrclib.append(lrclibHead, lrclibMsg, lrclibList);
+  setSearchSourceDot('netease', 'loading');
+  setSearchSourceDot('lrclib', 'loading');
 
   // 网易云搜索与 LRCLIB 并行；先到先显示，任一路失败都不影响另一路
   const neteaseTask = (async () => {
     if (!isNeteaseSourceEnabled()) {
       neteaseMsg.textContent = '已关闭网易云来源';
+      settle('netease');
       return;
     }
     try {
       const results = await fetchNeteaseSearch(q, 8);
       if (requestId !== searchRequestId) return;
-      neteaseList.replaceChildren();
       if (!results.length) {
         neteaseMsg.textContent = '网易云未找到匹配歌曲';
+        settle('netease');
         return;
       }
       neteaseMsg.hidden = true;
@@ -2299,12 +2366,15 @@ async function doSearch() {
           <div class="meta">${escapeHTML(item.artist || '')} · ${escapeHTML(item.album || '')} · ${formatDur((item.duration || 0) / 1000)}</div>
         `;
         div.addEventListener('click', () => loadFromNetease(item));
-        neteaseList.appendChild(div);
+        panes.netease.appendChild(div);
       });
+      counts.netease = Math.min(results.length, 8);
+      settle('netease');
     } catch (e) {
       if (requestId !== searchRequestId) return;
       neteaseMsg.textContent = `网易云暂不可用：${e.message}`;
       neteaseMsg.classList.add('error');
+      settle('netease', 'error');
     }
   })();
 
@@ -2315,7 +2385,7 @@ async function doSearch() {
   let anySuccess = false;
   const renderMerged = () => {
     if (requestId !== searchRequestId) return;
-    resultsList.replaceChildren();
+    lrclibList.replaceChildren();
     merged.slice(0, 16).forEach(item => {
       const div = document.createElement('div');
       div.className = 'result-item';
@@ -2327,10 +2397,9 @@ async function doSearch() {
         <div class="meta">${escapeHTML(artist)} · ${escapeHTML(item.albumName || '')} · ${formatDur(item.duration)}</div>
       `;
       div.addEventListener('click', () => loadFromLrclib(item));
-      resultsList.appendChild(div);
+      lrclibList.appendChild(div);
     });
-    searchingMsg.hidden = merged.length > 0;
-    setStatus(merged.length ? `找到 ${merged.length} 条歌词` : '搜索中...');
+    lrclibMsg.hidden = merged.length > 0;
   };
   const absorb = (data) => {
     if (requestId !== searchRequestId) return;
@@ -2361,30 +2430,16 @@ async function doSearch() {
   }
 
   if (requestId !== searchRequestId) return;
-  searchingMsg.hidden = true;
+  counts.lrclib = merged.length;
+  lrclibMsg.hidden = merged.length > 0;
   if (!merged.length && lastError && !anySuccess) {
-    const error = document.createElement('div');
-    error.className = 'search-message error';
-    error.textContent = `搜索失败：${lastError}`;
-    resultsList.appendChild(error);
-    setStatus('LRCLIB 搜索失败，本地缓存仍可使用', true);
+    lrclibMsg.textContent = `搜索失败：${lastError}`;
+    lrclibMsg.classList.add('error');
+    settle('lrclib', 'error');
     return;
   }
-  if (!merged.length) {
-    const empty = document.createElement('div');
-    empty.className = 'search-message';
-    empty.textContent = '未找到歌词。换个关键词试试？';
-    resultsList.appendChild(empty);
-    setStatus('未找到歌词');
-  } else {
-    setStatus(`找到 ${merged.length} 条歌词`);
-  }
-}
-
-function stripHTML(s) {
-  const div = document.createElement('div');
-  div.innerHTML = s;
-  return div.textContent || div.innerText || '';
+  if (!merged.length) lrclibMsg.textContent = '未找到歌词。换个关键词试试？';
+  settle('lrclib');
 }
 
 function formatDur(sec) {
@@ -2540,12 +2595,13 @@ async function loadFromLrclib(item) {
   if (!lrc) { setStatus('该结果无歌词内容', true); return; }
   $('#lrc-text').value = lrc;
   startAssistActionsForLyric(item);
-  setStatus(`${syncedLrc ? '已载入' : '已载入纯文本歌词'}：${item.trackName} - ${item.artistName}；正在后台搜索 Kanogoma 与逐字时间轴...`);
+  setStatus(`${syncedLrc ? '已载入' : '已载入纯文本歌词'}：${item.trackName} - ${item.artistName}；正在后台搜索 Marumaru 注音与逐字时间轴...`);
   await loadLrcFromText(lrc);
   setPanelCollapsed(true);
   if (!syncedLrc) switchToTimerMode();
   Promise.allSettled([
-    prefetchKanogomaCandidatesForLyric(item),
+    // LRCLIB 没有中文翻译，Marumaru 找到后自动补充注音与中文
+    prefetchMarumaruCandidatesForLyric(item, { autoApply: true }),
     (async () => {
       const plLines = await fetchPetitLyricsWordTiming(item.trackName, item.artistName);
       if (plLines) {
@@ -2686,106 +2742,18 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-$('#btn-apply-kanogoma')?.addEventListener('click', () => {
-  if (!latestKanogomaCandidates.length) {
-    setStatus('当前还没有可用的 Kanogoma 注音结果', true);
+$('#btn-apply-marumaru')?.addEventListener('click', () => {
+  if (!latestMarumaruCandidates.length) {
+    setStatus('当前还没有可用的 Marumaru 注音结果', true);
     return;
   }
-  loadFromKanogoma(latestKanogomaCandidates[0]);
+  loadFromMarumaru(latestMarumaruCandidates[0]);
 });
 
-/* ---------------- Kanogoma (lyrics + high-quality furigana) ---------------- */
-function kanogomaBuildSearchUrl(query) {
-  const u = new URL('https://kanogoma.com/wp-json/wp/v2/song');
-  u.searchParams.set('search', query);
-  u.searchParams.set('per_page', '12');
-  return u.toString();
-}
-
-const JINA_KEY_STORAGE = 'jplrc-jina-key';
-function getJinaApiKey() { return localStorage.getItem(JINA_KEY_STORAGE) || ''; }
-
-function fetchWithTimeout(url, options = {}, timeout = 12000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  return fetch(url, { ...options, signal: controller.signal })
-    .finally(() => clearTimeout(timer));
-}
-
-// 抓取 Kanogoma 歌词页：HTML 页无 CORS 头必须走代理，多通道自动切换。
-// Jina Reader 免 key 已要求认证（401），可在补充来源卡片填入免费 API key 走稳定通道。
-async function kanogomaFetchHtml(url) {
-  const jinaKey = getJinaApiKey();
-  const attempts = [
-    {
-      name: 'Jina Reader',
-      run: () => fetchWithTimeout('https://r.jina.ai/' + url, {
-        headers: {
-          'X-Return-Format': 'html',
-          ...(jinaKey ? { Authorization: `Bearer ${jinaKey}` } : {}),
-        },
-      }),
-    },
-    {
-      name: 'AllOrigins',
-      run: () => fetchWithTimeout('https://api.allorigins.win/raw?url=' + encodeURIComponent(url)),
-    },
-    {
-      name: 'CodeTabs',
-      run: () => fetchWithTimeout('https://api.codetabs.com/v1/proxy?quest=' + url),
-    },
-  ];
-  let lastError = null;
-  for (const attempt of attempts) {
-    try {
-      const response = await attempt.run();
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const html = await response.text();
-      // 校验返回的是真正的歌词页（代理可能返回错误页/验证页）
-      if (html && html.includes('id="kngm"')) return html;
-      throw new Error('返回内容不是歌词页');
-    } catch (e) {
-      console.warn(`[Kanogoma] ${attempt.name} 失败:`, e.message);
-      lastError = new Error(`${attempt.name}: ${e.message}`);
-    }
-  }
-  throw new Error(lastError ? lastError.message : '所有抓取通道均失败');
-}
-
-// Jina API Key 配置：存在 localStorage，保存后下次 Kanogoma 载入生效
-const jinaKeyInput = $('#jina-key-input');
-if (jinaKeyInput) {
-  jinaKeyInput.value = getJinaApiKey();
-  $('#btn-save-jina-key')?.addEventListener('click', () => {
-    const key = jinaKeyInput.value.trim();
-    if (key) localStorage.setItem(JINA_KEY_STORAGE, key);
-    else localStorage.removeItem(JINA_KEY_STORAGE);
-    setStatus(key ? 'Jina API Key 已保存，点击「应用 Kanogoma 注音」重试即可' : '已清除 Jina API Key');
-  });
-}
-
+/* ---------------- Marumaru (lyrics + high-quality furigana + 中文翻译) ---------------- */
+// marumaru-x.com：国内直连可用，但站点无 CORS 头，
+// 搜索与歌词页均经同域 Worker 代理（/api/marumaru/*）解析成 JSON。
 const RE_KANJI = /[\u3400-\u9fff々ヶ]/;
-
-function decodeHtmlText(text) {
-  const el = document.createElement('textarea');
-  el.innerHTML = text || '';
-  return el.value;
-}
-
-function kanogomaTitleFromSlug(slug = '') {
-  const decoded = decodeURIComponent(String(slug).replace(/\+/g, '%20'));
-  const parts = decoded.split('-').filter(Boolean);
-  if (parts.length >= 2) {
-    return `${parts.shift().toUpperCase()} - ${parts.join('-')}`;
-  }
-  return decoded || '(无标题)';
-}
-
-function kanogomaArtistFromItem(item) {
-  const artistClass = (item.class_list || []).find(name => name.startsWith('kngm_artist-')) || '';
-  const raw = artistClass.replace(/^kngm_artist-/, '').replace(/-/g, ' ');
-  return raw ? raw.replace(/\b\w/g, c => c.toUpperCase()) : '';
-}
 
 function normalizeLyricText(text) {
   return String(text || '')
@@ -2865,7 +2833,7 @@ function pushPlainKanaWords(words, text) {
   }
 }
 
-function kanogomaRomajiFromRubyElement(rubyEl) {
+function rubyElementToRomaji(rubyEl) {
   const words = [];
   let pendingRuby = '';
 
@@ -2908,18 +2876,17 @@ function kanogomaRomajiFromRubyElement(rubyEl) {
   return words.join(' ').replace(/\s+/g, ' ').trim();
 }
 
-function kanogomaParseLyric(html) {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const title = doc.querySelector('article h1, h1')?.textContent?.trim() || '';
-  const body = doc.querySelector('#kngm');
-  if (!body) return { title, lines: [], pairs: {} };
-
+// 把 Worker 返回的 Marumaru 行数据（日文 HTML 片段 + 中文）解析成统一行结构。
+// ruby 注音的文本/罗马音/读音表都在浏览器端用 DOM 计算（Worker 没有 DOMParser）。
+function marumaruParseLyricData(data) {
   const pairs = {};
   const lines = [];
-  body.querySelectorAll(':scope > div').forEach(row => {
-    const rubyEl = row.querySelector('p.ruby');
-    if (!rubyEl) return;
-    rubyEl.querySelectorAll('ruby').forEach(ruby => {
+  for (const raw of (Array.isArray(data?.lines) ? data.lines : [])) {
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `<p>${raw.ja || ''}</p>`;
+    const p = tpl.content.firstElementChild;
+    if (!p) continue;
+    p.querySelectorAll('ruby').forEach(ruby => {
       const clone = ruby.cloneNode(true);
       const rt = clone.querySelector('rt');
       const kana = rt?.textContent?.trim() || '';
@@ -2927,28 +2894,16 @@ function kanogomaParseLyric(html) {
       const kanji = clone.textContent.trim();
       if (kanji && kana && RE_KANJI.test(kanji) && !pairs[kanji]) pairs[kanji] = kana;
     });
-    const text = textFromRubyElement(rubyEl);
-    if (!text) return;
+    const text = textFromRubyElement(p);
+    if (!text) continue;
     lines.push({
       text,
-      jpHTML: rubyEl.innerHTML.trim(),
-      romaji: kanogomaRomajiFromRubyElement(rubyEl) || row.querySelector('p.rmj')?.textContent?.trim() || '',
-      zh: row.querySelector('p.zh')?.textContent?.trim() || '',
+      jpHTML: p.innerHTML.trim(),
+      romaji: rubyElementToRomaji(p),
+      zh: String(raw.zh || '').trim(),
     });
-  });
-  return { title, lines, pairs };
-}
-
-function kanogomaResultFromItem(item) {
-  const slug = item.slug || item.link?.match(/\/song\/([^/]+)\/?/)?.[1] || '';
-  const renderedTitle = stripHTML(item.title?.rendered || '').trim();
-  return {
-    id: item.id,
-    url: item.link || `https://kanogoma.com/song/${slug}/`,
-    slug,
-    title: decodeHtmlText(renderedTitle) || kanogomaTitleFromSlug(slug),
-    artist: kanogomaArtistFromItem(item),
-  };
+  }
+  return { title: data?.title || '', lines, pairs };
 }
 
 function mergeOverridesFromPairs(pairs) {
@@ -2963,13 +2918,16 @@ function mergeOverridesFromPairs(pairs) {
   return added;
 }
 
-async function searchKanogomaCandidates(title, artist = '') {
+async function searchMarumaruCandidates(title, artist = '') {
   const q = [title, artist].filter(Boolean).join(' ').trim();
   if (!q) return [];
-  const response = await fetch(kanogomaBuildSearchUrl(q), { credentials: 'omit' });
-  if (!response.ok) throw new Error('网络错误 ' + response.status);
-  let items = await response.json();
-  items = Array.isArray(items) ? items.map(kanogomaResultFromItem) : [];
+  // 关键词走路径式并附时间戳（与网易云搜索同一套防移动缓存串结果的策略）
+  const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const data = await fetchProxyJson(`/api/marumaru/search/${encodeURIComponent(q)}?_t=${stamp}`, 12000);
+  if (data?.query != null && String(data.query).trim().toLowerCase() !== q.toLowerCase()) {
+    throw new Error('返回结果与关键词不一致，请重试');
+  }
+  let items = Array.isArray(data?.results) ? data.results : [];
   if (artist) {
     const artistLower = artist.toLowerCase();
     items = items.slice().sort((left, right) => {
@@ -2983,34 +2941,60 @@ async function searchKanogomaCandidates(title, artist = '') {
   return items;
 }
 
-async function prefetchKanogomaCandidatesForLyric(item) {
+async function fetchMarumaruLyric(item) {
+  const data = await fetchProxyJson(`/api/marumaru/lyric?url=${encodeURIComponent(item.url)}`, 15000);
+  if (!Array.isArray(data?.lines) || !data.lines.length) {
+    throw new Error('页面未能解析出歌词');
+  }
+  return data;
+}
+
+async function prefetchMarumaruCandidatesForLyric(item, { autoApply = false } = {}) {
   const title = item?.trackName || '';
   const artist = item?.artistName || '';
-  const requestId = ++kanogomaSearchRequestId;
-  latestKanogomaCandidates = [];
-  latestKanogomaQuery = title;
-  assistSearchState.kanogoma = { status: 'loading', message: '', count: 0 };
+  const requestId = ++marumaruSearchRequestId;
+  latestMarumaruCandidates = [];
+  assistSearchState.marumaru = { status: 'loading', message: '', count: 0 };
   renderAssistActions();
   try {
-    const items = await searchKanogomaCandidates(title, artist);
-    if (requestId !== kanogomaSearchRequestId) return;
+    const items = await searchMarumaruCandidates(title, artist);
+    if (requestId !== marumaruSearchRequestId) return;
     if (!items.length) {
-      assistSearchState.kanogoma = { status: 'empty', message: '', count: 0 };
+      assistSearchState.marumaru = { status: 'empty', message: '', count: 0 };
       renderAssistActions();
       return;
     }
-    latestKanogomaCandidates = items.slice(0, 10);
-    latestKanogomaQuery = title;
-    assistSearchState.kanogoma = { status: 'ready', message: '', count: latestKanogomaCandidates.length };
+    latestMarumaruCandidates = items.slice(0, 10);
+    assistSearchState.marumaru = { status: 'ready', message: '', count: latestMarumaruCandidates.length };
     renderAssistActions();
+    if (autoApply) await autoApplyMarumaru(requestId);
   } catch (e) {
-    if (requestId !== kanogomaSearchRequestId) return;
-    assistSearchState.kanogoma = { status: 'error', message: e.message, count: 0 };
+    if (requestId !== marumaruSearchRequestId) return;
+    assistSearchState.marumaru = { status: 'error', message: e.message, count: 0 };
     renderAssistActions();
   }
 }
 
-function buildTimedLinesFromKanogoma(lines, stepSeconds = 4) {
+// 自动补充：抓取首个候选的歌词页，把注音/罗马音/中文套到当前已载入的歌词行上
+async function autoApplyMarumaru(requestId) {
+  try {
+    const data = await fetchMarumaruLyric(latestMarumaruCandidates[0]);
+    if (requestId !== marumaruSearchRequestId) return;
+    const parsed = marumaruParseLyricData(data);
+    if (!parsed.lines.length) return;
+    const added = mergeOverridesFromPairs(parsed.pairs);
+    const applied = await applyMarumaruToCurrentLyrics(parsed);
+    if (requestId !== marumaruSearchRequestId) return;
+    if (applied) {
+      applyToggleClasses();
+      setStatus(`Marumaru ✓ 已补充 ${applied} 行注音/罗马音/中文${added ? `，学到 ${added} 个新读音` : ''}。`);
+    }
+  } catch (e) {
+    console.warn('[Marumaru] 自动应用失败:', e.message);
+  }
+}
+
+function buildTimedLinesFromMarumaru(lines, stepSeconds = 4) {
   return lines.map((line, index) => ({
     time: index * stepSeconds,
     text: line.text,
@@ -3020,7 +3004,7 @@ function buildTimedLinesFromKanogoma(lines, stepSeconds = 4) {
   }));
 }
 
-async function applyKanogomaToCurrentLyrics(data) {
+async function applyMarumaruToCurrentLyrics(data) {
   const byText = new Map();
   for (const line of data.lines) {
     const key = normalizeLyricText(line.text);
@@ -3047,40 +3031,37 @@ async function applyKanogomaToCurrentLyrics(data) {
   return applied;
 }
 
-async function loadFromKanogoma(item) {
-  setStatus(`Kanogoma 载入：${item.title}...`);
+async function loadFromMarumaru(item) {
+  setStatus(`Marumaru 载入：${item.title}...`);
   try {
-    const html = await kanogomaFetchHtml(item.url);
-    const data = kanogomaParseLyric(html);
-    if (!data.lines.length) {
-      setStatus('Kanogoma 页面未能解析出歌词', true);
+    const data = await fetchMarumaruLyric(item);
+    const parsed = marumaruParseLyricData(data);
+    if (!parsed.lines.length) {
+      setStatus('Marumaru 页面未能解析出歌词', true);
       return;
     }
-    const added = mergeOverridesFromPairs(data.pairs);
+    const added = mergeOverridesFromPairs(parsed.pairs);
     searchResults.hidden = true;
 
     const lrcText = $('#lrc-text').value;
     if (lrcText.trim() && lrcLines.length) {
-      const applied = await applyKanogomaToCurrentLyrics(data);
+      const applied = await applyMarumaruToCurrentLyrics(parsed);
       if (applied) {
         applyToggleClasses();
-        setStatus(`Kanogoma ✓ 已应用 ${applied} 行注音/罗马音/中文，学到 ${added} 个新读音。`);
+        setStatus(`Marumaru ✓ 已应用 ${applied} 行注音/罗马音/中文，学到 ${added} 个新读音。`);
       } else {
-        setStatus(`Kanogoma ✓ 学到 ${added} 个新读音，未找到可直接匹配的同步歌词行，正在重新渲染本地注音...`);
+        setStatus(`Marumaru ✓ 学到 ${added} 个新读音，未找到可直接匹配的同步歌词行，正在重新渲染本地注音...`);
         await loadLrcFromText(lrcText);
       }
     } else {
-      const fakeLrc = buildFakeLrcFromPlainText(data.lines.map(line => line.text).join('\n'));
+      const fakeLrc = buildFakeLrcFromPlainText(parsed.lines.map(line => line.text).join('\n'));
       $('#lrc-text').value = fakeLrc;
-      await renderLyrics(buildTimedLinesFromKanogoma(data.lines));
+      await renderLyrics(buildTimedLinesFromMarumaru(parsed.lines));
       switchToTimerMode();
-      setStatus(`Kanogoma ✓ 已显示歌词、注音、罗马音和中文翻译（无时间轴，请使用计时模式）。`);
+      setStatus(`Marumaru ✓ 已显示歌词、注音、罗马音和中文翻译（无时间轴，请使用计时模式）。`);
     }
   } catch (e) {
-    const hint = getJinaApiKey()
-      ? ''
-      : '（可在上方填入 Jina 免费 API Key 后重试，或稍后再试）';
-    setStatus(`Kanogoma 载入失败：${e.message}${hint}`, true);
+    setStatus(`Marumaru 载入失败：${e.message}`, true);
   }
 }
 

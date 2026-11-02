@@ -11,7 +11,7 @@
 - 罗马音标记：拖选罗马音添加中文一至四声、连读线或文字备注，也可在字母间插入中断 `/`；标记保存在当前浏览器。
 - 中文翻译：可显示歌词自带中文，也可用 MyMemory 免费 API 自动翻译。
 - 多音频来源：支持本地音频文件、手动计时模式。
-- Kanogoma 补充注音：载入歌词后可尝试从 Kanogoma 获取更高质量注音、罗马音和中文翻译。
+- Marumaru 补充注音：载入歌词后自动从 marumaru-x.com 获取更高质量注音、罗马音和中文翻译（经同域 Worker 代理）。
 - 读音修正：内置常见读音修正，也支持自定义 `汉字=假名|romaji` 词条。
 - 日语学习模式：输入日语句子，转换为假名和罗马音，支持单句朗读和全文朗读。
 - 日语 TTS：学习模式可选择不同音色，默认优先尝试百度/有道等中国区接口，再兜底到 VOICEVOX 和浏览器 ja-JP 语音。
@@ -35,8 +35,7 @@
 | [LRCLIB](https://lrclib.net/) | `GET https://lrclib.net/api/search` | 歌词搜索，返回多个候选结果（含行级时间轴、纯文本歌词、元数据） | 允许 | 是（主搜索入口） |
 | 网易云歌词代理（自建 Worker） | `GET {PROXY}/api/search`、`GET {PROXY}/api/lyric` | 网易云歌词：`yrc` 逐字时间轴、`tlyric` 人工中文翻译、`yromalrc` 罗马音 | 由 Worker 提供 | 否（不可用时自动回退 LRCLIB） |
 | [PetitLyrics](https://petitlyrics.com/) | `POST https://p0.petitlyrics.com/api/GetPetitLyricsData.php` | 获取 Type 3 逐字时间轴（每个字都有 starttime/endtime），用于 KTV 式渐变高亮 | 允许 (`*`) | 否（无数据时回退线性估算） |
-| [Kanogoma](https://kanogoma.com/) | `GET https://kanogoma.com/wp-json/wp/v2/song` | 搜索高质量日文注音歌词页面，获取带 ruby 注音的歌词、罗马音和中文翻译 | 需代理 | 否（补充来源） |
-| [Jina AI Reader](https://r.jina.ai/) | `GET https://r.jina.ai/{url}` | 作为 HTML 抓取代理，读取 Kanogoma 歌词页面内容 | 允许 | 否（仅 Kanogoma 功能依赖） |
+| [marumaru-x.com](https://www.marumaru-x.com/) | `GET {PROXY}/api/marumaru/search/<关键词>`、`GET {PROXY}/api/marumaru/lyric?url=...` | 搜索带 ruby 注音的日文歌词页，获取注音、罗马音和中文翻译（Worker 代理解析） | 由 Worker 提供 | 否（补充来源，国内直连） |
 
 ### 翻译
 
@@ -75,8 +74,7 @@ LRCLIB API ──→ 返回多个候选（歌名/歌手/时间轴/歌词文本�
     ├──→ PetitLyrics API（后台并行）──→ Type 3 逐字时间轴
     │         └──→ 匹配到歌词行 → KTV 逐字渐变高亮
     │
-    ├──→ Kanogoma API（后台并行）──→ 高质量注音歌词
-    │         └──→ Jina AI Reader 代理抓取页面 HTML
+    ├──→ Marumaru 代理接口（后台并行）──→ 高质量注音歌词 + 中文翻译
     │
     └──→ MyMemory API（按需）──→ 自动中文翻译
 ```
@@ -216,7 +214,7 @@ LRC 格式示例：
 | 歌词搜索 | LRCLIB API（返回多候选 + 行级时间轴） |
 | 逐字时间轴 | PetitLyrics API（Type 3，每个字含 starttime/endtime） |
 | KTV 渐变高亮 | CSS `background-clip: text` + `linear-gradient` + `requestAnimationFrame` |
-| 歌词注音补充 | Kanogoma WordPress REST API，页面内容经 r.jina.ai 代理读取 |
+| 歌词注音补充 | marumaru-x.com 歌词页，经自建 Worker 代理抓取解析（国内直连） |
 | 中文翻译 | MyMemory 免费翻译 API |
 | 学习模式朗读 | 百度/有道优先，VOICEVOX / tts.quest 多声线兜底，最后回退 Web Speech ja-JP |
 | 音频播放 | 原生 `<audio>`、手动计时器 |
@@ -259,6 +257,6 @@ Vercel / Netlify / Cloudflare Pages：构建命令留空，输出目录使用项
 - PetitLyrics 逐字时间轴为日本曲库，非日语歌曲可能无数据；此时回退到线性估算渐变。
 - PetitLyrics API 每次请求只返回 1 条结果，无法让用户从多个候选中选择，因此搜索仍以 LRCLIB 为主。
 - 免费翻译和 TTS 接口可能受网络、跨域、频率限制影响；应用会按中国区接口、VOICEVOX、浏览器日语语音顺序兜底。
-- Kanogoma 抓取依赖 r.jina.ai 代理，可能受网络环境影响。
+- Marumaru 代理依赖 marumaru-x.com 的页面结构，站点改版时需要更新解析逻辑。
 - 自动注音和罗马音无法保证所有专有名词、歌词特殊读法都完全准确，可用读音修正补充。
 - Web Speech 回退朗读依赖系统/浏览器是否安装 Japanese / ja-JP 语音。

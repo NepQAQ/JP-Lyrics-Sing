@@ -5,14 +5,18 @@
  *   GET /api/search?q=Bloody%20Stream&limit=10
  *   GET /api/lyric?id=26239032
  *   GET /api/lyric?title=Bloody%20Stream&artist=Coda
+ *   GET /api/marumaru/search/<关键词>
+ *   GET /api/marumaru/lyric?url=japanese-song/play-xxxx
  *
- * 数据源：网易云音乐网页端歌词接口（无需登录）。
- * 返回统一结构，优先提供 yrc 逐字时间轴、ytlrc 中文翻译、yromalrc 罗马音。
+ * 数据源：
+ *   - 网易云音乐网页端歌词接口（无需登录），提供 yrc 逐字时间轴、ytlrc 中文翻译、yromalrc 罗马音。
+ *   - marumaru-x.com（国内直连）：补充带 ruby 注音的歌词与中文翻译。
  */
 
 const UPSTREAM_TIMEOUT_MS = 12000;
 const SEARCH_CACHE_TTL = 60 * 60; // 1 小时
 const LYRIC_CACHE_TTL = 7 * 24 * 60 * 60; // 7 天
+const MARUMARU_BASE = 'https://www.marumaru-x.com';
 
 const UPSTREAM_HEADERS = {
   'User-Agent':
@@ -23,6 +27,16 @@ const UPSTREAM_HEADERS = {
   'Accept-Language': 'zh-CN,zh;q=0.9,ja;q=0.8,en;q=0.7',
   // 网易云对无 Cookie 的请求更容易判定为异常，带上客户端标识可降低风控概率
   'Cookie': 'appver=2.0.2; os=pc; NMTID=00O',
+};
+
+// marumaru-x.com 是普通 HTML 站点，带浏览器头即可正常访问（国内直连）
+const MARUMARU_HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+    '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+  'Referer': MARUMARU_BASE + '/',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'ja;q=0.9,zh-CN,zh;q=0.8,en;q=0.7',
 };
 
 class ApiError extends Error {
@@ -72,6 +86,8 @@ export default {
               search: '/api/search?q=Bloody%20Stream&limit=10',
               lyricById: '/api/lyric?id=26239032',
               lyricByTitle: '/api/lyric?title=Bloody%20Stream&artist=Coda',
+              marumaruSearch: '/api/marumaru/search/<关键词>',
+              marumaruLyric: '/api/marumaru/lyric?url=japanese-song/play-xxxx',
             },
           },
           { request, env, cacheControl: 'no-store' }
@@ -95,6 +111,14 @@ export default {
 
       if (path === '/api/lyric') {
         return await handleLyric(request, url, env, ctx);
+      }
+
+      if (path === '/api/marumaru/search' || path.startsWith('/api/marumaru/search/')) {
+        return await handleMarumaruSearch(request, url, env, ctx);
+      }
+
+      if (path === '/api/marumaru/lyric') {
+        return await handleMarumaruLyric(request, url, env, ctx);
       }
 
       throw new ApiError(404, 'NOT_FOUND', '接口不存在');
@@ -222,6 +246,185 @@ async function handleLyric(request, url, env, ctx) {
       headers: { 'X-Cache': cached.state },
     }
   );
+}
+
+/* ---------------- marumaru-x.com（注音歌词 + 中文翻译） ---------------- */
+
+// 搜索：GET /api/marumaru/search/<关键词>
+// 上游是 https://www.marumaru-x.com/japanese-song/search-all/<关键词> 的隐藏接口。
+async function handleMarumaruSearch(request, url, env, ctx) {
+  const q = marumaruSearchQuery(url);
+  if (!q) {
+    throw new ApiError(400, 'MISSING_QUERY', '缺少搜索关键词');
+  }
+
+  const cached = await cachedJson(
+    ctx,
+    request,
+    'marumaru-search',
+    { q },
+    SEARCH_CACHE_TTL,
+    async () => {
+      const results = await searchMarumaru(q);
+      return {
+        source: 'marumaru',
+        query: q,
+        count: results.length,
+        results,
+      };
+    },
+    (data) => data.count > 0,
+    (data) => sameQuery(data?.query, q)
+  );
+
+  return jsonResponse(
+    cached.data,
+    {
+      request,
+      env,
+      cacheControl: 'no-store',
+      headers: { 'X-Cache': cached.state },
+    }
+  );
+}
+
+// 歌词详情：GET /api/marumaru/lyric?url=japanese-song/play-xxxx
+// 只做粗粒度切片（行 → 日文原文 HTML / 中文翻译），ruby 注音的精算交给前端 DOMParser。
+async function handleMarumaruLyric(request, url, env, ctx) {
+  const raw = cleanQuery(url.searchParams.get('url'));
+  const path = marumaruLyricPath(raw);
+  if (!path) {
+    throw new ApiError(400, 'INVALID_URL', 'url 必须是 marumaru-x.com 的 japanese-song/play-xxx 页面');
+  }
+
+  const cached = await cachedJson(
+    ctx,
+    request,
+    'marumaru-lyric',
+    { path },
+    LYRIC_CACHE_TTL,
+    async () => fetchMarumaruLyric(path)
+  );
+
+  return jsonResponse(
+    cached.data,
+    {
+      request,
+      env,
+      cacheControl: 'public, max-age=21600',
+      headers: { 'X-Cache': cached.state },
+    }
+  );
+}
+
+async function searchMarumaru(query) {
+  const target = `${MARUMARU_BASE}/japanese-song/search-all/${encodeURIComponent(query)}`;
+  const response = await fetchUpstream(target, 1, { headers: MARUMARU_HEADERS });
+  if (!response.ok) {
+    throw new ApiError(502, 'MARUMARU_SEARCH_FAILED', `Marumaru 搜索返回 ${response.status}`);
+  }
+  const html = await response.text();
+  return parseMarumaruSearchHtml(html);
+}
+
+async function fetchMarumaruLyric(path) {
+  const response = await fetchUpstream(`${MARUMARU_BASE}/${path}`, 1, { headers: MARUMARU_HEADERS });
+  if (!response.ok) {
+    throw new ApiError(502, 'MARUMARU_LYRIC_FAILED', `Marumaru 歌词页返回 ${response.status}`);
+  }
+  const html = await response.text();
+  const data = parseMarumaruLyricHtml(html);
+  if (!data.lines.length) {
+    throw new ApiError(404, 'NO_LYRIC', 'Marumaru 页面未能解析出歌词');
+  }
+  return data;
+}
+
+// 搜索结果页结构（探测结论）：
+//   <div id="vt-data-list"> 内若干 <div class="song-list-root">，
+//   每条：h2.card-title > a[href="japanese-song/play-xxx"][title="歌名"]，后随 h3.card-subtitle（歌手）。
+function parseMarumaruSearchHtml(html) {
+  const results = [];
+  const rowRe =
+    /<h2[^>]*class="[^"]*card-title[^"]*"[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*title="([^"]*)"[^>]*>[\s\S]*?<\/a>\s*<\/h2>\s*<h3[^>]*class="[^"]*card-subtitle[^"]*"[^>]*>([\s\S]*?)<\/h3>/g;
+
+  let match;
+  while ((match = rowRe.exec(html))) {
+    let href = match[1].trim();
+    if (!/japanese-song\/play-[\w-]+/i.test(href)) continue;
+    // href 是站内相对路径，统一挂到站点根，方便前端直接回传给歌词接口
+    if (!/^https?:\/\//i.test(href)) href = MARUMARU_BASE + '/' + href.replace(/^\/+/, '');
+    const title = decodeHtmlEntities(match[2] || '').trim();
+    const artist = decodeHtmlEntities(stripTags(match[3] || '')).trim();
+    if (!title) continue;
+    results.push({ url: href, title, artist });
+  }
+  return results;
+}
+
+// 歌词详情页结构（探测结论）：
+//   <ul id="lyrics-list"> 内若干 <li class="mr-lyrics-list">，
+//   每行：<p lang="ja">（含 <ruby><rb>漢字</rb><rt>かな</rt></ruby> 注音）、
+//         <p class="lyrics-translate-zh">、<p class="lyrics-translate-en">。
+function parseMarumaruLyricHtml(html) {
+  const titleMatch = html.match(/<h2[^>]*>([\s\S]*?)<\/h2>/);
+  const title = titleMatch ? decodeHtmlEntities(stripRt(titleMatch[1])).trim() : '';
+
+  const lines = [];
+  const liRe = /<li[^>]*class="[^"]*mr-lyrics-list[^"]*"[^>]*>([\s\S]*?)<\/li>/g;
+  let liMatch;
+  while ((liMatch = liRe.exec(html))) {
+    const row = liMatch[1];
+    const jaMatch = row.match(/<p[^>]*lang="ja"[^>]*>([\s\S]*?)<\/p>/);
+    if (!jaMatch) continue;
+    const zhMatch = row.match(/<p[^>]*class="[^"]*lyrics-translate-zh[^"]*"[^>]*>([\s\S]*?)<\/p>/);
+    lines.push({
+      ja: jaMatch[1].trim(),
+      zh: zhMatch ? decodeHtmlEntities(stripTags(zhMatch[1])).trim() : '',
+    });
+  }
+  return { source: 'marumaru', url: '', title, lineCount: lines.length, lines };
+}
+
+function marumaruSearchQuery(url) {
+  const match = String(url.pathname || '').match(/^\/api\/marumaru\/search\/(.+)$/);
+  if (match) {
+    try {
+      return cleanQuery(decodeURIComponent(match[1]));
+    } catch {
+      return '';
+    }
+  }
+  return cleanQuery(url.searchParams.get('q'));
+}
+
+// 只接受站内歌词页路径（绝对 URL 或相对路径均可），防 SSRF
+function marumaruLyricPath(value) {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(?:https:\/\/www\.marumaru-x\.com)?\/?(japanese-song\/play-[A-Za-z0-9_-]+)\/?$/i);
+  return match ? match[1] : null;
+}
+
+function stripTags(value) {
+  return String(value || '').replace(/<[^>]*>/g, '');
+}
+
+// 去掉注音 <rt> 内容（标题里的 ruby 会把读音混进纯文本）
+function stripRt(value) {
+  return String(value || '').replace(/<rt[^>]*>[\s\S]*?<\/rt>/gi, '');
+}
+
+function decodeHtmlEntities(value) {
+  return String(value || '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)));
 }
 
 // 网易云搜索有多条等价入口，其中任一入口被风控或限流时空结果；

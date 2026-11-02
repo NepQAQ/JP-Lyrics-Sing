@@ -11,7 +11,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&family=Noto+Sans+SC:wght@400;500&family=Zen+Maru+Gothic:wght@500;700&display=swap"
     rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20261102" />
+  <link rel="stylesheet" href="styles.css?v=20261102b" />
 </head>
 
 <body>
@@ -145,14 +145,10 @@
     <div id="assist-actions" class="assist-actions glass" hidden>
       <div class="assist-actions-head">
         <div class="assist-actions-title">补充来源</div>
-        <div id="assist-actions-meta" class="assist-actions-meta">选择歌词后，将自动搜索 Kanogoma。</div>
+        <div id="assist-actions-meta" class="assist-actions-meta">选择歌词后，将自动搜索 Marumaru。</div>
       </div>
       <div class="assist-actions-buttons">
-        <button id="btn-apply-kanogoma" class="assist-btn" type="button" disabled>Kanogoma 待命</button>
-      </div>
-      <div class="jina-key-row">
-        <input id="jina-key-input" type="password" placeholder="Jina API Key（可选，用于修复 Kanogoma 载入）" autocomplete="off" spellcheck="false" />
-        <button id="btn-save-jina-key" class="jina-key-save" type="button">保存</button>
+        <button id="btn-apply-marumaru" class="assist-btn" type="button" disabled>Marumaru 待命</button>
       </div>
     </div>
 
@@ -205,7 +201,7 @@
     <div class="row toggles">
       <label class="chip"><input type="checkbox" id="show-furigana" checked /><span>假名</span></label>
       <label class="chip"><input type="checkbox" id="show-romaji" checked /><span>罗马音</span></label>
-      <label class="chip"><input type="checkbox" id="show-zh" /><span>中文</span></label>
+      <label class="chip"><input type="checkbox" id="show-zh" checked /><span>中文</span></label>
       <label class="chip"><input type="checkbox" id="auto-translate" /><span>自动翻译</span></label>
       <label class="chip markup-mode-chip" title="开启后可拖选罗马音添加标记">
         <input type="checkbox" id="enable-romaji-markup" /><span>标记罗马音</span>
@@ -324,7 +320,7 @@
   <script src="lib/kuromoji.js"></script>
   <script src="lib/kuroshiro.min.js"></script>
   <script src="lib/kuroshiro-analyzer-kuromoji.min.js"></script>
-  <script src="app.js?v=20261102c"></script>
+  <script src="app.js?v=20261102d"></script>
 </body>
 
 </html>

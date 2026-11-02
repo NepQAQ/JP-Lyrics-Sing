@@ -2919,26 +2919,34 @@ function mergeOverridesFromPairs(pairs) {
 }
 
 async function searchMarumaruCandidates(title, artist = '') {
-  const q = [title, artist].filter(Boolean).join(' ').trim();
-  if (!q) return [];
-  // 关键词走路径式并附时间戳（与网易云搜索同一套防移动缓存串结果的策略）
-  const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-  const data = await fetchProxyJson(`/api/marumaru/search/${encodeURIComponent(q)}?_t=${stamp}`, 12000);
-  if (data?.query != null && String(data.query).trim().toLowerCase() !== q.toLowerCase()) {
-    throw new Error('返回结果与关键词不一致，请重试');
+  // marumaru 的 search-all 把整个关键词当一个词处理，「歌名 歌手」组合查询必然落空，
+  // 所以只按歌名搜，无结果时再用歌手名兜底
+  const queries = [String(title || '').trim(), String(artist || '').trim()]
+    .filter(Boolean)
+    .filter((q, i, arr) => arr.indexOf(q) === i);
+  if (!queries.length) return [];
+  for (const q of queries) {
+    // 关键词走路径式并附时间戳（与网易云搜索同一套防移动缓存串结果的策略）
+    const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const data = await fetchProxyJson(`/api/marumaru/search/${encodeURIComponent(q)}?_t=${stamp}`, 12000);
+    if (data?.query != null && String(data.query).trim().toLowerCase() !== q.toLowerCase()) {
+      throw new Error('返回结果与关键词不一致，请重试');
+    }
+    let items = Array.isArray(data?.results) ? data.results : [];
+    if (!items.length) continue;
+    if (artist) {
+      const artistLower = String(artist).toLowerCase();
+      items = items.slice().sort((left, right) => {
+        const leftText = `${left.title} ${left.artist}`.toLowerCase();
+        const rightText = `${right.title} ${right.artist}`.toLowerCase();
+        const leftHit = leftText.includes(artistLower) ? 1 : 0;
+        const rightHit = rightText.includes(artistLower) ? 1 : 0;
+        return rightHit - leftHit;
+      });
+    }
+    return items;
   }
-  let items = Array.isArray(data?.results) ? data.results : [];
-  if (artist) {
-    const artistLower = artist.toLowerCase();
-    items = items.slice().sort((left, right) => {
-      const leftText = `${left.title} ${left.artist}`.toLowerCase();
-      const rightText = `${right.title} ${right.artist}`.toLowerCase();
-      const leftHit = leftText.includes(artistLower) ? 1 : 0;
-      const rightHit = rightText.includes(artistLower) ? 1 : 0;
-      return rightHit - leftHit;
-    });
-  }
-  return items;
+  return [];
 }
 
 async function fetchMarumaruLyric(item) {

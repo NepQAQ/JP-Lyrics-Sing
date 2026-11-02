@@ -15,5 +15,12 @@
   },
   "vars": {
     "ALLOWED_ORIGINS": "https://nepqaq.github.io,http://localhost:8765,http://127.0.0.1:8765"
+  },
+  // 生产环境：CF 上新建的「生产」Git 项目部署命令需用 npx wrangler deploy -e production，
+  // 未指定环境（dev 项目）仍走顶层配置，两者互不影响
+  "env": {
+    "production": {
+      "name": "jp-lyrics-sing"
+    }
   }
 }

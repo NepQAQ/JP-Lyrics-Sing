@@ -119,6 +119,12 @@ async function handleSearch(request, url, env, ctx) {
     SEARCH_CACHE_TTL,
     async () => {
       const { results, via, attempts } = await searchNetease(q, limit);
+      // 上游偶发返回与关键词无关的结果（手机端出现过搜「群青」拿到「94」的歌），
+      // 一旦写入缓存会被固化。宁可报错让前端重试，也绝不返回/缓存错乱结果。
+      if (results.length && !results.some((song) => resultMatchesQuery(q, song))) {
+        console.log('[diag][mismatch]', JSON.stringify({ q, top: results.slice(0, 3).map((r) => r.title) }));
+        throw new ApiError(502, 'UPSTREAM_SEARCH_MISMATCH', '搜索结果与关键词不符，请重试');
+      }
       return {
         source: 'netease',
         query: q,
@@ -133,6 +139,13 @@ async function handleSearch(request, url, env, ctx) {
     (data) => sameQuery(data?.query, q)
   );
 
+  // 临时诊断：记录缓存命中状态与最终返回内容
+  console.log('[diag][search]', JSON.stringify({
+    q,
+    cacheState: cached.state,
+    count: cached.data?.count ?? null,
+    top: (cached.data?.results || []).slice(0, 3).map((r) => r.title),
+  }));
   return jsonResponse(
     cached.data,
     {
@@ -287,31 +300,44 @@ async function searchNetease(query, limit) {
       const data = await readJson(response, '网易云搜索返回了非 JSON 内容');
       const songs = data?.result?.songs;
       const code = data?.code ?? null;
+      // 临时诊断：记录 worker 实际发给网易云的关键词与上游返回内容
+      console.log('[diag][netease]', JSON.stringify({
+        via: strategy.name,
+        query,
+        upstreamUrl: request.url,
+        code,
+        songCount: Array.isArray(songs) ? songs.length : null,
+        top: (Array.isArray(songs) ? songs : []).slice(0, 3).map((s) => s?.name || s?.title || ''),
+      }));
       if (!Array.isArray(songs) || !songs.length) {
         attempts.push({ via: strategy.name, status: 200, code, count: 0 });
         continue;
       }
-      return {
-        via: strategy.name,
-        attempts,
-        results: songs
-          .map((song) => ({
-            id: Number(song?.id),
-            title: cleanText(song?.name || song?.title || ''),
-            artist: (Array.isArray(song?.artists)
-              ? song.artists
-              : Array.isArray(song?.ar)
-                ? song.ar
-                : []
-            )
-              .map((item) => cleanText(item?.name || ''))
-              .filter(Boolean)
-              .join(' / '),
-            album: cleanText(song?.album?.name || song?.al?.name || ''),
-            duration: Number(song?.duration || song?.dt || 0) || 0,
-          }))
-          .filter((song) => Number.isFinite(song.id) && song.id > 0),
-      };
+      const mapped = songs
+        .map((song) => ({
+          id: Number(song?.id),
+          title: cleanText(song?.name || song?.title || ''),
+          artist: (Array.isArray(song?.artists)
+            ? song.artists
+            : Array.isArray(song?.ar)
+              ? song.ar
+              : []
+          )
+            .map((item) => cleanText(item?.name || ''))
+            .filter(Boolean)
+            .join(' / '),
+          album: cleanText(song?.album?.name || song?.al?.name || ''),
+          duration: Number(song?.duration || song?.dt || 0) || 0,
+        }))
+        .filter((song) => Number.isFinite(song.id) && song.id > 0);
+      // 网易云对部分出口 IP 偶发返回与关键词完全无关的错乱结果
+      // （出现过 s=群青 却返回「94」的歌曲列表）：视为该通道无效，降级尝试下一通道
+      if (mapped.length && !mapped.some((song) => resultMatchesQuery(query, song))) {
+        console.log('[diag][mismatch-fallback]', JSON.stringify({ via: strategy.name, query, top: mapped.slice(0, 3).map((r) => r.title) }));
+        attempts.push({ via: strategy.name, status: 200, code, count: mapped.length, mismatch: true });
+        continue;
+      }
+      return { via: strategy.name, attempts, results: mapped };
     } catch (error) {
       lastError = error;
       attempts.push({ via: strategy.name, error: error.message });
@@ -320,6 +346,12 @@ async function searchNetease(query, limit) {
 
   if (attempts.every((item) => item.error)) {
     throw lastError || new ApiError(502, 'UPSTREAM_SEARCH_FAILED', '网易云搜索全部入口失败');
+  }
+
+  // 所有通道都返回了与关键词无关的错乱结果：大概率是上游对当前出口 IP 的风控。
+  // 报错让前端重试（重试可能落到正常出口），绝不把错乱结果当成功返回。
+  if (attempts.length && attempts.every((item) => item.mismatch)) {
+    throw new ApiError(502, 'UPSTREAM_SEARCH_MISMATCH', '搜索结果与关键词不符，请重试');
   }
 
   return { via: null, attempts, results: [] };
@@ -661,7 +693,8 @@ async function cachedJson(ctx, request, bucket, params, ttlSeconds, producer, sh
       keyUrl.searchParams.set(key, String(value));
     }
   }
-  keyUrl.searchParams.set('__cache', `${bucket}:v3`);
+  // v4：废弃历史上被上游污染的搜索缓存（出现过 query=群青 但内容是「94」的脏数据）
+  keyUrl.searchParams.set('__cache', `${bucket}:v4`);
 
   const cacheKey = new Request(keyUrl.toString(), { method: 'GET' });
 
@@ -795,6 +828,19 @@ function normalizeMatchText(value) {
     .normalize('NFKC')
     .toLowerCase()
     .replace(/[\s\-_'"“”‘’・·.,，。!！?？:：()（）[\]【】]/g, '');
+}
+
+// 宽松相关性自检：query 的每个词都出现在同一首歌的标题/歌手/专辑里才算有效。
+// 拦截上游偶发的错乱返回（如搜「群青」返回「94」），避免错数据被返回或固化进缓存。
+function resultMatchesQuery(query, song) {
+  const tokens = String(query || '')
+    .trim()
+    .split(/\s+/)
+    .map((token) => normalizeMatchText(token))
+    .filter(Boolean);
+  if (!tokens.length) return true;
+  const haystack = normalizeMatchText([song?.title, song?.artist, song?.album].join(' '));
+  return tokens.every((token) => haystack.includes(token));
 }
 
 function clampInt(value, min, max, fallback) {

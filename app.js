@@ -2113,24 +2113,38 @@ function buildLrclibSearchWaves(q) {
 
 /* ---------------- 网易云歌词源（经 Cloudflare Worker） ---------------- */
 async function fetchNeteaseSearch(q, limit = 8) {
-  const buildPath = (bust) =>
-    `/api/search?q=${encodeURIComponent(q)}&limit=${limit}${bust ? `&_t=${Date.now()}` : ''}`;
   const norm = (s) => String(s ?? '').trim().toLowerCase();
   const demoji = (data) => (Array.isArray(data?.results) ? data.results : []);
+  const matches = (data) => data?.query != null && norm(data.query) === norm(q);
+  // 关键词放进路径（并附随机时间戳）：移动网络与中间缓存常把 URL 查询串丢掉，
+  // 于是同一个 /api/search 缓存被不同关键词共用，返回上一个关键词的结果。
+  // 同时保留 ?q= 形式，代理还没升级到路径式时仍可用。
+  const buildUrls = () => {
+    const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const tail = `limit=${limit}&_t=${stamp}`;
+    return [
+      `/api/search/${encodeURIComponent(q)}?${tail}`,
+      `/api/search?q=${encodeURIComponent(q)}&${tail}`,
+    ];
+  };
 
-  let data = await fetchProxyJson(buildPath(false), 9000);
-  let results = demoji(data);
-
-  // 代理侧或中间链路偶发用错缓存（返回别的关键词结果）时，带时间戳绕过缓存重取一次
-  if (data?.query != null && norm(data.query) !== norm(q)) {
-    data = await fetchProxyJson(buildPath(true), 9000);
-    results = demoji(data);
-    if (data?.query != null && norm(data.query) !== norm(q)) {
-      throw new Error('返回结果与关键词不一致，请再点一次搜索');
+  let lastError = null;
+  // 两轮：任一次都拿不到「关键词一致」的结果时，再换时间戳重新取
+  for (let round = 0; round < 2; round++) {
+    for (const url of buildUrls()) {
+      let data;
+      try {
+        data = await fetchProxyJson(url, 9000);
+      } catch (e) {
+        lastError = e;
+        continue;
+      }
+      if (matches(data)) return demoji(data);
+      lastError = new Error('返回结果与关键词不一致，请再点一次搜索');
     }
   }
 
-  return results;
+  throw lastError || new Error('网易云搜索失败');
 }
 
 // 把统一结构回写成 LRC 文本，便于编辑、导出与本地缓存

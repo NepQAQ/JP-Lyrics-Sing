@@ -89,7 +89,7 @@ export default {
         );
       }
 
-      if (path === '/api/search') {
+      if (path === '/api/search' || path.startsWith('/api/search/')) {
         return await handleSearch(request, url, env, ctx);
       }
 
@@ -105,7 +105,7 @@ export default {
 };
 
 async function handleSearch(request, url, env, ctx) {
-  const q = cleanQuery(url.searchParams.get('q'));
+  const q = searchQuery(url);
   if (!q) {
     throw new ApiError(400, 'MISSING_QUERY', '缺少搜索关键词 q');
   }
@@ -128,7 +128,9 @@ async function handleSearch(request, url, env, ctx) {
         ...(results.length ? {} : { attempts }),
       };
     },
-    (data) => data.count > 0
+    (data) => data.count > 0,
+    // 缓存命中的结果必须确实属于当前关键词，否则视为脏缓存重新取
+    (data) => sameQuery(data?.query, q)
   );
 
   return jsonResponse(
@@ -136,8 +138,9 @@ async function handleSearch(request, url, env, ctx) {
     {
       request,
       env,
-      // 空结果不允许被浏览器或边缘节点缓存，避免一次风控影响后续很久
-      cacheControl: cached.data?.count > 0 ? `public, max-age=${SEARCH_CACHE_TTL}` : 'no-store',
+      // 搜索结果一律不缓存到浏览器/中间链路：一旦被按路径缓存，
+      // 不同关键词会互相串结果（手机端出现过搜「群青」拿到「94」的结果）。
+      cacheControl: 'no-store',
       headers: { 'X-Cache': cached.state },
     }
   );
@@ -639,7 +642,7 @@ async function readJson(response, message) {
   }
 }
 
-async function cachedJson(ctx, request, bucket, params, ttlSeconds, producer, shouldCache) {
+async function cachedJson(ctx, request, bucket, params, ttlSeconds, producer, shouldCache, validateHit) {
   let cache = null;
   try {
     cache = caches.default;
@@ -658,14 +661,17 @@ async function cachedJson(ctx, request, bucket, params, ttlSeconds, producer, sh
       keyUrl.searchParams.set(key, String(value));
     }
   }
-  keyUrl.searchParams.set('__cache', `${bucket}:v2`);
+  keyUrl.searchParams.set('__cache', `${bucket}:v3`);
 
   const cacheKey = new Request(keyUrl.toString(), { method: 'GET' });
 
   const hit = await cache.match(cacheKey);
   if (hit) {
     try {
-      return { data: await hit.json(), state: 'HIT' };
+      const data = await hit.json();
+      if (!validateHit || validateHit(data)) {
+        return { data, state: 'HIT' };
+      }
     } catch {
       // 缓存内容损坏时直接重新取。
     }
@@ -757,6 +763,24 @@ function cleanQuery(value) {
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
     .trim()
     .slice(0, 120);
+}
+
+// 关键词支持两种写法：/api/search/<关键词> 或 /api/search?q=<关键词>。
+// 路径式用于绕开会丢弃 URL 查询串的移动网络/中间缓存，避免不同关键词互相串结果。
+function searchQuery(url) {
+  const match = String(url.pathname || '').match(/^\/api\/search\/(.+)$/);
+  if (match) {
+    try {
+      return cleanQuery(decodeURIComponent(match[1]));
+    } catch {
+      return '';
+    }
+  }
+  return cleanQuery(url.searchParams.get('q'));
+}
+
+function sameQuery(value, expected) {
+  return String(value || '').trim().toLowerCase() === String(expected || '').trim().toLowerCase();
 }
 
 function cleanText(value) {

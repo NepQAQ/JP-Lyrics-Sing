@@ -1222,7 +1222,13 @@ async function fillFuriganaProgressively(targets, generation) {
         if (generation !== renderGeneration) return;
         if (!ln.jpHTML) ln.jpHTML = html;
         ln.el.querySelector('.jp').innerHTML = ln.jpHTML || escapeHTML(ln.text);
-        if (romaji && needRomaji) setLyricRomaji(ln, romaji);
+        // 罗马音必须无条件写入 DOM：行自带的（如网易云 yromalrc）也要显示，
+        // 否则会出现「数据里有但页面上没有」
+        const finalRomaji = (needRomaji ? (romaji || ln.romaji) : (ln.romaji || romaji)) || '';
+        if (finalRomaji) {
+          ln.romaji = finalRomaji;
+          renderRomajiText(ln.el.querySelector('.romaji'), finalRomaji, ln.text);
+        }
       } else if (needRomaji) {
         // 已有注音（Marumaru/LRC 自带），只需要补罗马音
         const romaji = await toRomajiOnly(ln.text);
@@ -2898,7 +2904,8 @@ function normalizeLyricText(text) {
 
 function textFromRubyElement(el) {
   const clone = el.cloneNode(true);
-  clone.querySelectorAll('rt').forEach(rt => rt.remove());
+  // marumaru 部分行用 <rtc> 而非 <rt> 包注音，两类都要去掉才是纯文本
+  clone.querySelectorAll('rt, rtc, rp').forEach(node => node.remove());
   return (clone.textContent || '').replace(/\u00a0/g, ' ').trim();
 }
 
@@ -2980,7 +2987,8 @@ function rubyElementToRomaji(rubyEl) {
   rubyEl.childNodes.forEach(node => {
     if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === 'ruby') {
       flushPending();
-      pendingRuby = node.querySelector('rt')?.textContent?.trim() || '';
+      // marumaru 部分行用 <rtc> 而非 <rt>，都要认
+      pendingRuby = node.querySelector('rt, rtc')?.textContent?.trim() || '';
       return;
     }
 
@@ -3022,7 +3030,7 @@ function marumaruParseLyricData(data) {
     if (!p) continue;
     p.querySelectorAll('ruby').forEach(ruby => {
       const clone = ruby.cloneNode(true);
-      const rt = clone.querySelector('rt');
+      const rt = clone.querySelector('rt, rtc');
       const kana = rt?.textContent?.trim() || '';
       if (rt) rt.remove();
       const kanji = clone.textContent.trim();

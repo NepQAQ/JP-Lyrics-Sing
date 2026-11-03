@@ -678,7 +678,9 @@ $$('.sub-tabs').forEach(group => {
 // "/cdn.jsdelivr.net/...", which leaves the UI stuck at "加载分词器" while requests 404.
 // Serving the dictionary from this site avoids that broken URL normalization entirely.
 const DICT_CDNS = ['dict/'];
-const DICT_TIMEOUT_MS = 25000;
+// 词典共 17MB、12 个文件，移动网络首装可能要 30-60s；超时太短会误判失败，
+// 导致之后所有行都拿不到注音（表现为「读的不全」）
+const DICT_TIMEOUT_MS = 60000;
 let kuroshiroFailed = false;
 
 function withTimeout(promise, ms, label) {
@@ -696,6 +698,21 @@ async function tryInitKuroshiro(dictPath) {
   return k;
 }
 
+let kuroshiroFailedAt = 0;
+
+// 词典状态只在还没有歌词时占用状态栏，避免把歌名/进度文案挤掉
+function setDictStatus(msg) {
+  if (!lrcLines.length) setStatus(msg);
+}
+
+// 失败后隔一段时间再允许重试：既不永久瘫痪，也不至于每行都重新下载 17MB 词典
+function allowKuroshiroRetry() {
+  if (kuroshiroFailed && Date.now() - kuroshiroFailedAt > 60000) {
+    kuroshiroFailed = false;
+    kuroshiroReady = null;
+  }
+}
+
 async function ensureKuroshiro() {
   if (kuroshiro) return kuroshiro;
   if (kuroshiroFailed) throw new Error('分词器之前加载失败，请重试');
@@ -705,11 +722,11 @@ async function ensureKuroshiro() {
     let lastErr;
     for (let i = 0; i < DICT_CDNS.length; i++) {
       const cdn = DICT_CDNS[i];
-      setStatus(`正在加载日语分词器 (${i + 1}/${DICT_CDNS.length}) ...`);
+      setDictStatus(`正在加载日语分词器 (${i + 1}/${DICT_CDNS.length}) ...`);
       try {
         const k = await tryInitKuroshiro(cdn);
         kuroshiro = k;
-        setStatus('分词器已就绪 ✓');
+        setDictStatus('分词器已就绪 ✓');
         return k;
       } catch (e) {
         lastErr = e;
@@ -717,15 +734,29 @@ async function ensureKuroshiro() {
       }
     }
     kuroshiroFailed = true;
-    kuroshiroReady = null; // allow retry on next call
+    kuroshiroFailedAt = Date.now();
+    kuroshiroReady = null;
     throw lastErr || new Error('所有 CDN 均失败');
   })();
 
   return kuroshiroReady;
 }
 
+// 同一行文本在一次会话内只转换一次：切歌来回、切显示模式都能立刻复用
+const furiganaCache = new Map();
+const FURIGANA_CACHE_MAX = 3000;
+function cacheFuriganaResult(key, value) {
+  if (furiganaCache.size >= FURIGANA_CACHE_MAX) furiganaCache.clear();
+  furiganaCache.set(key, value);
+  return value;
+}
+function clearFuriganaCache() { furiganaCache.clear(); }
+
 async function toFurigana(text) {
   if (!text || !text.trim()) return { html: '', romaji: '' };
+  const cacheKey = 'both:' + text;
+  const hit = furiganaCache.get(cacheKey);
+  if (hit) return hit;
   // Always honor the manual overrides first (works even without kuroshiro).
   const segments = splitByOverrides(text);
   let k;
@@ -784,7 +815,50 @@ async function toFurigana(text) {
       if (r && r.trim()) romajiParts.push(r.trim());
     }
   }
-  return { html, romaji: romajiParts.join(' ').replace(/\s+/g, ' ').trim() };
+  return cacheFuriganaResult(cacheKey, {
+    html,
+    romaji: romajiParts.join(' ').replace(/\s+/g, ' ').trim(),
+  });
+}
+
+// 只算罗马音（已有注音 HTML 时用它，省掉一次 furigana 转换）
+async function toRomajiOnly(text) {
+  if (!text || !text.trim()) return '';
+  const cacheKey = 'romaji:' + text;
+  const hit = furiganaCache.get(cacheKey);
+  if (hit) return hit;
+  const segments = splitByOverrides(text);
+  let k;
+  try {
+    k = await ensureKuroshiro();
+  } catch {
+    const only = segments
+      .filter(seg => seg.type === 'override' && seg.romaji)
+      .map(seg => seg.romaji)
+      .join(' ');
+    return only.trim();
+  }
+  const parts = [];
+  for (const seg of segments) {
+    if (seg.type === 'override') {
+      if (seg.romaji) parts.push(seg.romaji);
+      continue;
+    }
+    const t = seg.text;
+    if (!t) continue;
+    let r = '';
+    try {
+      r = await k.convert(t, { to: 'romaji', mode: 'spaced', romajiSystem: 'hepburn' });
+    } catch {}
+    if (!r || !r.trim()) {
+      try {
+        const hira = await k.convert(t, { to: 'hiragana', mode: 'normal' });
+        r = kanaToRomajiSimple(hira);
+      } catch {}
+    }
+    if (r && r.trim()) parts.push(r.trim());
+  }
+  return cacheFuriganaResult(cacheKey, parts.join(' ').replace(/\s+/g, ' ').trim());
 }
 
 /* ---------------- Reading overrides ---------------- */
@@ -941,6 +1015,7 @@ function applyOverridesFromTextarea() {
   }
   userOverrides = next;
   saveOverrides();
+  clearFuriganaCache(); // 读音表变了，旧的注音结果作废
   setStatus(`已保存 ${Object.keys(userOverrides).length} 条自定义读音。重新加载歌词后生效。`);
 }
 loadOverrides();
@@ -1105,7 +1180,66 @@ async function translateToZh(text) {
 }
 
 /* ---------------- Render ---------------- */
+let renderGeneration = 0;
+
+// 切歌时必须回到顶部，否则会保留上一首的滚动位置
+function resetLyricsScroll() {
+  const prev = lyricsView.style.scrollBehavior;
+  lyricsView.style.scrollBehavior = 'auto'; // 绕过 CSS 的 smooth，避免慢悠悠滚回去
+  lyricsView.scrollTop = 0;
+  document.scrollingElement?.scrollTo?.(0, 0);
+  lyricsView.style.scrollBehavior = prev;
+}
+
+function setLyricRomaji(ln, romaji) {
+  if (!romaji) return;
+  ln.romaji = romaji;
+  renderRomajiText(ln.el.querySelector('.romaji'), romaji, ln.text);
+}
+
+// 后台逐批补注音：先让歌词秒出，再把假名/罗马音一行行填进去
+async function fillFuriganaProgressively(targets, generation) {
+  // 分词器只在这里尝试一次：失败就整体放弃，避免逐行重复下载词典
+  allowKuroshiroRetry();
+  try {
+    await ensureKuroshiro();
+  } catch (e) {
+    if (generation === renderGeneration) {
+      setStatus('注音分词器加载失败，歌词可正常显示，重新搜索可再次尝试', true);
+    }
+    return;
+  }
+  for (let i = 0; i < targets.length; i++) {
+    if (generation !== renderGeneration) return; // 已切歌，丢弃旧任务
+    const ln = targets[i];
+    if (ln.__external) continue; // Marumaru 已提供，不覆盖
+    try {
+      const needRomaji = !ln.romaji || !hasWordSpacedRomaji(ln.romaji);
+      if (!ln.jpHTML) {
+        const { html, romaji } = await toFurigana(ln.text);
+        if (generation !== renderGeneration) return;
+        if (!ln.jpHTML) ln.jpHTML = html;
+        ln.el.querySelector('.jp').innerHTML = ln.jpHTML || escapeHTML(ln.text);
+        if (romaji && needRomaji) setLyricRomaji(ln, romaji);
+      } else if (needRomaji) {
+        // 已有注音（Marumaru/LRC 自带），只需要补罗马音
+        const romaji = await toRomajiOnly(ln.text);
+        if (generation !== renderGeneration) return;
+        setLyricRomaji(ln, romaji);
+      }
+    } catch (e) { /* 单行失败不影响其它行 */ }
+    if ((i + 1) % 10 === 0 && generation === renderGeneration) {
+      setStatus(`正在生成注音 ${i + 1}/${targets.length}...`);
+    }
+  }
+  if (generation === renderGeneration) {
+    setStatus(`已就绪 ✓ 共 ${lrcLines.length} 行`);
+  }
+}
+
 async function renderLyrics(parsed) {
+  const generation = ++renderGeneration;
+  resetLyricsScroll();
   lyricsView.innerHTML = '';
   lrcLines = [];
   activeIdx = -1;
@@ -1114,7 +1248,6 @@ async function renderLyrics(parsed) {
     lyricsView.innerHTML = '<div class="hint-card"><p>未解析到歌词。</p></div>';
     return;
   }
-  setStatus(`解析到 ${parsed.length} 行，正在生成假名/罗马音...`);
 
   const topSpacer = document.createElement('div');
   topSpacer.className = 'lrc-spacer lrc-spacer-top';
@@ -1146,27 +1279,25 @@ async function renderLyrics(parsed) {
 
   applyToggleClasses();
 
-  const autoTranslate = $('#auto-translate').checked;
-  for (let i = 0; i < lrcLines.length; i++) {
-    const ln = lrcLines[i];
-    const needsGeneratedRomaji = !ln.cached && (!ln.romaji || !hasWordSpacedRomaji(ln.romaji));
-    if (ln.jpHTML && !needsGeneratedRomaji) {
+  // 1) 已经有注音/罗马音的行走快速路径，其余行立即用纯文本占位（保证秒出）
+  const pending = [];
+  for (const ln of lrcLines) {
+    if (ln.jpHTML && ln.romaji && hasWordSpacedRomaji(ln.romaji)) {
       ln.el.querySelector('.jp').innerHTML = ln.jpHTML;
-      renderRomajiText(ln.el.querySelector('.romaji'), ln.romaji || '', ln.text);
+      renderRomajiText(ln.el.querySelector('.romaji'), ln.romaji, ln.text);
     } else {
-      try {
-        const { html, romaji } = await toFurigana(ln.text);
-        if (!ln.jpHTML) ln.jpHTML = html;
-        if (romaji) ln.romaji = romaji;
-        ln.el.querySelector('.jp').innerHTML = ln.jpHTML || html || escapeHTML(ln.text);
-        renderRomajiText(ln.el.querySelector('.romaji'), romaji || ln.romaji || '', ln.text);
-      } catch (e) { /* ignore */ }
+      pending.push(ln);
     }
     if (ln.zh) ln.el.querySelector('.zh').textContent = ln.zh;
-    if (i % 10 === 0) setStatus(`处理歌词中 ${i + 1}/${lrcLines.length}...`);
   }
-  setStatus(`已就绪 ✓ 共 ${lrcLines.length} 行`);
+  setStatus(pending.length
+    ? `已就绪 ✓ 共 ${lrcLines.length} 行 · 后台生成注音 ${pending.length} 行...`
+    : `已就绪 ✓ 共 ${lrcLines.length} 行`);
 
+  // 2) 注音在后台逐行补上，不再阻塞歌词显示
+  if (pending.length) fillFuriganaProgressively(pending, generation);
+
+  const autoTranslate = $('#auto-translate').checked;
   if (autoTranslate) {
     setStatus('正在翻译中文（受 API 速率限制，可能较慢）...');
     for (let i = 0; i < lrcLines.length; i++) {
@@ -2208,8 +2339,9 @@ async function loadFromNetease(item) {
   const lrcText = buildLrcFromParsed(parsed);
   $('#lrc-text').value = lrcText;
   startAssistActionsForLyric(meta);
-  await renderLyrics(parsed);
+  // 先收起面板露出歌词，再渲染（注音在后台补，不能挡住首屏）
   setPanelCollapsed(true);
+  await renderLyrics(parsed);
 
   const wordLines = parsed.filter(line => line.wordTiming).length;
   setStatus(
@@ -2596,8 +2728,8 @@ async function loadFromLrclib(item) {
   $('#lrc-text').value = lrc;
   startAssistActionsForLyric(item);
   setStatus(`${syncedLrc ? '已载入' : '已载入纯文本歌词'}：${item.trackName} - ${item.artistName}；正在后台搜索 Marumaru 注音与逐字时间轴...`);
-  await loadLrcFromText(lrc);
   setPanelCollapsed(true);
+  await loadLrcFromText(lrc);
   if (!syncedLrc) switchToTimerMode();
   Promise.allSettled([
     // LRCLIB 没有中文翻译，Marumaru 找到后自动补充注音与中文
@@ -3022,6 +3154,7 @@ async function applyMarumaruToCurrentLyrics(data) {
   for (const ln of lrcLines) {
     const hit = byText.get(normalizeLyricText(ln.text));
     if (!hit) continue;
+    ln.__external = true; // 标记：后台的注音任务不要覆盖 Marumaru 的结果
     ln.jpHTML = hit.jpHTML;
     ln.romaji = hit.romaji;
     if (!hasWordSpacedRomaji(ln.romaji)) {

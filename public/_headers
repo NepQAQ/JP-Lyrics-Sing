@@ -1,0 +1,7 @@
+# 日语分词词典：内容永不变化，长缓存避免每次访问重新校验 12 个文件
+/dict/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# 第三方分词库：版本稳定，缓存一天
+/lib/*
+  Cache-Control: public, max-age=86400

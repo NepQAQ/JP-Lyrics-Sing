@@ -319,7 +319,7 @@ async function handleMarumaruLyric(request, url, env, ctx) {
 
 async function searchMarumaru(query) {
   const target = `${MARUMARU_BASE}/japanese-song/search-all/${encodeURIComponent(query)}`;
-  const response = await fetchUpstream(target, 1, { headers: MARUMARU_HEADERS });
+  const response = await fetchUpstream(target, 1, { headers: MARUMARU_HEADERS, timeoutMs: 20000 });
   if (!response.ok) {
     throw new ApiError(502, 'MARUMARU_SEARCH_FAILED', `Marumaru 搜索返回 ${response.status}`);
   }
@@ -328,7 +328,7 @@ async function searchMarumaru(query) {
 }
 
 async function fetchMarumaruLyric(path) {
-  const response = await fetchUpstream(`${MARUMARU_BASE}/${path}`, 1, { headers: MARUMARU_HEADERS });
+  const response = await fetchUpstream(`${MARUMARU_BASE}/${path}`, 1, { headers: MARUMARU_HEADERS, timeoutMs: 20000 });
   if (!response.ok) {
     throw new ApiError(502, 'MARUMARU_LYRIC_FAILED', `Marumaru 歌词页返回 ${response.status}`);
   }
@@ -830,7 +830,8 @@ async function fetchUpstream(url, retries = 1, init = {}) {
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+    // marumaru 页面偶发较慢，允许按调用点放宽超时
+    const timer = setTimeout(() => controller.abort(), init.timeoutMs || UPSTREAM_TIMEOUT_MS);
 
     try {
       const response = await fetch(url, {

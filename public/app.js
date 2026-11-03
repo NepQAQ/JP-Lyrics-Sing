@@ -1212,7 +1212,9 @@ async function fillFuriganaProgressively(targets, generation) {
   for (let i = 0; i < targets.length; i++) {
     if (generation !== renderGeneration) return; // 已切歌，丢弃旧任务
     const ln = targets[i];
-    if (ln.__external) continue; // Marumaru 已提供，不覆盖
+    // Marumaru 已提供完整注音的行跳过；但它给的罗马音可能为空或不成词，
+    // 这类行仍要补（否则会出现「有假名没罗马音」）
+    if (ln.__external && ln.romaji && hasWordSpacedRomaji(ln.romaji)) continue;
     try {
       const needRomaji = !ln.romaji || !hasWordSpacedRomaji(ln.romaji);
       if (!ln.jpHTML) {
@@ -3059,8 +3061,19 @@ async function searchMarumaruCandidates(title, artist = '') {
   if (!queries.length) return [];
   for (const q of queries) {
     // 关键词走路径式并附时间戳（与网易云搜索同一套防移动缓存串结果的策略）
+    // marumaru 在国内移动网络上偶发较慢，超时放宽并重试一次，避免误报「暂不可用」
     const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    const data = await fetchProxyJson(`/api/marumaru/search/${encodeURIComponent(q)}?_t=${stamp}`, 12000);
+    const url = `/api/marumaru/search/${encodeURIComponent(q)}?_t=${stamp}`;
+    let data = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        data = await fetchProxyJson(url, 25000);
+        break;
+      } catch (e) {
+        if (attempt === 1) throw e;
+        await new Promise(r => setTimeout(r, 600));
+      }
+    }
     if (data?.query != null && String(data.query).trim().toLowerCase() !== q.toLowerCase()) {
       throw new Error('返回结果与关键词不一致，请重试');
     }
@@ -3082,7 +3095,17 @@ async function searchMarumaruCandidates(title, artist = '') {
 }
 
 async function fetchMarumaruLyric(item) {
-  const data = await fetchProxyJson(`/api/marumaru/lyric?url=${encodeURIComponent(item.url)}`, 15000);
+  const url = `/api/marumaru/lyric?url=${encodeURIComponent(item.url)}`;
+  let data = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      data = await fetchProxyJson(url, 25000);
+      break;
+    } catch (e) {
+      if (attempt === 1) throw e;
+      await new Promise(r => setTimeout(r, 600));
+    }
+  }
   if (!Array.isArray(data?.lines) || !data.lines.length) {
     throw new Error('页面未能解析出歌词');
   }
@@ -3151,13 +3174,15 @@ async function applyMarumaruToCurrentLyrics(data) {
     if (key && !byText.has(key)) byText.set(key, line);
   }
   let applied = 0;
+  const needRomajiLines = [];
   for (const ln of lrcLines) {
     const hit = byText.get(normalizeLyricText(ln.text));
     if (!hit) continue;
     ln.__external = true; // 标记：后台的注音任务不要覆盖 Marumaru 的结果
     ln.jpHTML = hit.jpHTML;
     ln.romaji = hit.romaji;
-    if (!hasWordSpacedRomaji(ln.romaji)) {
+    // 分词器还没就绪时不要在这里等（会卡住整轮应用），留给后台补
+    if (kuroshiro && !hasWordSpacedRomaji(ln.romaji)) {
       try {
         const generated = await toFurigana(ln.text);
         if (generated.romaji) ln.romaji = generated.romaji;
@@ -3167,8 +3192,11 @@ async function applyMarumaruToCurrentLyrics(data) {
     ln.el.querySelector('.jp').innerHTML = hit.jpHTML || escapeHTML(ln.text);
     renderRomajiText(ln.el.querySelector('.romaji'), ln.romaji || '', ln.text);
     ln.el.querySelector('.zh').textContent = hit.zh || '';
+    if (!hasWordSpacedRomaji(ln.romaji)) needRomajiLines.push(ln);
     applied++;
   }
+  // Marumaru 没带罗马音的行，交给后台补上
+  if (needRomajiLines.length) fillFuriganaProgressively(needRomajiLines, renderGeneration);
   return applied;
 }
 

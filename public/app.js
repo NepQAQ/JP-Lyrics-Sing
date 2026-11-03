@@ -1212,14 +1212,27 @@ async function fillFuriganaProgressively(targets, generation) {
   for (let i = 0; i < targets.length; i++) {
     if (generation !== renderGeneration) return; // 已切歌，丢弃旧任务
     const ln = targets[i];
-    // Marumaru 已提供完整注音的行跳过；但它给的罗马音可能为空或不成词，
-    // 这类行仍要补（否则会出现「有假名没罗马音」）
-    if (ln.__external && ln.romaji && hasWordSpacedRomaji(ln.romaji)) continue;
+    // Marumaru 的罗马音是按它自己的假名推出来的（おもい/すき 这类演唱读法），
+    // 分词器只会给标准读音（しんねん/かんげき），绝不能用后者覆盖前者。
+    // 这类行只缺罗马音时按行内假名补，并无条件写一次 DOM（数据有但页面没写也是 bug）。
+    if (ln.__external) {
+      const rubyRomaji = ln.romaji || romajiFromJpHTML(ln.jpHTML);
+      if (rubyRomaji) {
+        setLyricRomaji(ln, rubyRomaji);
+        continue;
+      }
+      // 行内假名推不出罗马音（极少，如纯英文行）时，继续往下走分词器兜底
+    }
     try {
       const needRomaji = !ln.romaji || !hasWordSpacedRomaji(ln.romaji);
       if (!ln.jpHTML) {
         const { html, romaji } = await toFurigana(ln.text);
         if (generation !== renderGeneration) return;
+        // await 期间 Marumaru 可能已经到达并写好注音，这时只能用它的结果
+        if (ln.__external) {
+          setLyricRomaji(ln, ln.romaji || romajiFromJpHTML(ln.jpHTML));
+          continue;
+        }
         if (!ln.jpHTML) ln.jpHTML = html;
         ln.el.querySelector('.jp').innerHTML = ln.jpHTML || escapeHTML(ln.text);
         // 罗马音必须无条件写入 DOM：行自带的（如网易云 yromalrc）也要显示，
@@ -1230,9 +1243,13 @@ async function fillFuriganaProgressively(targets, generation) {
           renderRomajiText(ln.el.querySelector('.romaji'), finalRomaji, ln.text);
         }
       } else if (needRomaji) {
-        // 已有注音（Marumaru/LRC 自带），只需要补罗马音
-        const romaji = await toRomajiOnly(ln.text);
-        if (generation !== renderGeneration) return;
+        // 已有注音（LRC 自带 / Marumaru）：优先按行内假名推罗马音，保证和看到的假名一致；
+        // 行内推不出来才回落分词器
+        let romaji = romajiFromJpHTML(ln.jpHTML);
+        if (!romaji) {
+          romaji = await toRomajiOnly(ln.text);
+          if (generation !== renderGeneration) return;
+        }
         setLyricRomaji(ln, romaji);
       }
     } catch (e) { /* 单行失败不影响其它行 */ }
@@ -3018,6 +3035,20 @@ function rubyElementToRomaji(rubyEl) {
   return words.join(' ').replace(/\s+/g, ' ').trim();
 }
 
+// 从行内已有的注音 HTML 推导罗马音：保证罗马音和页面上的假名一致
+// （分词器只会给标准读音，覆盖不了演唱用读法，所以有注音时必须走这里）
+function romajiFromJpHTML(jpHTML) {
+  if (!jpHTML) return '';
+  try {
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `<p>${jpHTML}</p>`;
+    const p = tpl.content.firstElementChild;
+    return p ? rubyElementToRomaji(p) : '';
+  } catch {
+    return '';
+  }
+}
+
 // 把 Worker 返回的 Marumaru 行数据（日文 HTML 片段 + 中文）解析成统一行结构。
 // ruby 注音的文本/罗马音/读音表都在浏览器端用 DOM 计算（Worker 没有 DOMParser）。
 function marumaruParseLyricData(data) {
@@ -3188,9 +3219,11 @@ async function applyMarumaruToCurrentLyrics(data) {
     if (!hit) continue;
     ln.__external = true; // 标记：后台的注音任务不要覆盖 Marumaru 的结果
     ln.jpHTML = hit.jpHTML;
-    ln.romaji = hit.romaji;
-    // 分词器还没就绪时不要在这里等（会卡住整轮应用），留给后台补
-    if (kuroshiro && !hasWordSpacedRomaji(ln.romaji)) {
+    ln.romaji = hit.romaji || romajiFromJpHTML(hit.jpHTML);
+    // Marumaru 的罗马音是按它自己的假名推的，短行（不足 3 词）同样有效，
+    // 不能再让分词器用标准读音覆盖；只有完全推不出来时才回落分词器。
+    // 分词器还没就绪时不要在这里等（会卡住整轮应用），留给后台补。
+    if (!ln.romaji && kuroshiro) {
       try {
         const generated = await toFurigana(ln.text);
         if (generated.romaji) ln.romaji = generated.romaji;
@@ -3200,7 +3233,7 @@ async function applyMarumaruToCurrentLyrics(data) {
     ln.el.querySelector('.jp').innerHTML = hit.jpHTML || escapeHTML(ln.text);
     renderRomajiText(ln.el.querySelector('.romaji'), ln.romaji || '', ln.text);
     ln.el.querySelector('.zh').textContent = hit.zh || '';
-    if (!hasWordSpacedRomaji(ln.romaji)) needRomajiLines.push(ln);
+    if (!ln.romaji) needRomajiLines.push(ln);
     applied++;
   }
   // Marumaru 没带罗马音的行，交给后台补上

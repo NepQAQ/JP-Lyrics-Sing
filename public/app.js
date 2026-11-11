@@ -77,6 +77,8 @@ const songPractice = {
   timeline: 'unknown',
   audioReady: false,
   audioError: '',
+  audioLoading: '',
+  audioFormat: '',
   objectURL: null,
   offset: 0,
   active: null,
@@ -84,6 +86,8 @@ const songPractice = {
   endTimer: null,
   notice: null,
 };
+let audioFileRequestId = 0;
+let ncmWorker = null;
 let activeIdx = -1;
 let translationCache = new Map();
 const assistSearchState = {
@@ -1861,6 +1865,7 @@ function updateSongPracticeUI() {
   const status = $('#song-practice-status');
   let message;
   if (songPractice.audioError) message = songPractice.audioError;
+  else if (songPractice.audioLoading) message = songPractice.audioLoading;
   else if (!songPractice.objectURL) message = '请在「本地 → 音频」上传歌曲文件；音频仅在本机播放，不做内容识别。';
   else if (!songPractice.audioReady) message = '正在读取音频，请等待浏览器确认可播放。';
   else if (player.mode !== 'audio') message = '请切换到「本地 → 音频」音源后练习；计时与视频音源不支持歌曲片段。';
@@ -1909,6 +1914,7 @@ function failSongPractice(error, segment) {
 
 function seekSongPractice(segment) {
   segment.expectedSeek = segment.start;
+  segment.expectedSeekStarted = performance.now();
   audio.currentTime = segment.start;
 }
 
@@ -2015,7 +2021,9 @@ audio.addEventListener('loadeddata', () => {
   if (!songPractice.objectURL || audio.src !== songPractice.objectURL || audio.readyState < 2) return;
   songPractice.audioReady = !audio.error && Number.isFinite(audio.duration) && audio.duration > 0;
   songPractice.audioError = songPractice.audioReady ? '' : '音频时长无效，请更换可播放的文件。';
-  setStatus(songPractice.audioError || `已加载音频：${$('#audio-file-name').textContent}`, !!songPractice.audioError);
+  songPractice.audioLoading = '';
+  const format = songPractice.audioFormat ? `（${songPractice.audioFormat}）` : '';
+  setStatus(songPractice.audioError || `已加载音频${format}：${$('#audio-file-name').textContent}；点击播放器播放。`, !!songPractice.audioError);
   updateSongPracticeUI();
 });
 audio.addEventListener('durationchange', () => {
@@ -2024,24 +2032,37 @@ audio.addEventListener('durationchange', () => {
   updateSongPracticeUI();
 });
 audio.addEventListener('error', () => {
-  if (!audio.error) return;
+  if (!audio.error || !songPractice.objectURL || audio.src !== songPractice.objectURL) return;
   stopSongPractice();
   songPractice.audioReady = false;
+  songPractice.audioLoading = '';
   songPractice.audioError = '音频加载或解码失败，请更换浏览器支持的有效音频文件。';
+  URL.revokeObjectURL(songPractice.objectURL);
+  songPractice.objectURL = null;
+  audio.removeAttribute('src');
+  audio.load();
+  setPlayerVisible(false);
   setStatus(songPractice.audioError, true);
   updateSongPracticeUI();
 });
+function isExpectedSongPracticeSeek(segment) {
+  if (segment.expectedSeek === null) return false;
+  const elapsed = Math.max(0, performance.now() - segment.expectedSeekStarted) / 1000;
+  return audio.currentTime >= segment.expectedSeek - 0.08 &&
+    audio.currentTime <= segment.expectedSeek + elapsed * audio.playbackRate + 0.08;
+}
+
 audio.addEventListener('seeking', () => {
   const segment = songPractice.active;
   if (!segment) return;
-  if (segment.expectedSeek === null || Math.abs(audio.currentTime - segment.expectedSeek) > 0.08) {
+  if (!isExpectedSongPracticeSeek(segment)) {
     stopSongPractice({ pause: false });
   }
 });
 audio.addEventListener('seeked', () => {
   const segment = songPractice.active;
   if (!segment) return;
-  if (segment.expectedSeek !== null && Math.abs(audio.currentTime - segment.expectedSeek) > 0.08) {
+  if (segment.expectedSeek !== null && !isExpectedSongPracticeSeek(segment)) {
     stopSongPractice({ pause: false });
     return;
   }
@@ -2061,7 +2082,10 @@ audio.addEventListener('ratechange', () => {
 });
 window.addEventListener('pagehide', (event) => {
   stopSongPractice();
-  if (!event.persisted && songPractice.objectURL) URL.revokeObjectURL(songPractice.objectURL);
+  if (!event.persisted) {
+    cancelNcmConversion();
+    if (songPractice.objectURL) URL.revokeObjectURL(songPractice.objectURL);
+  }
 });
 
 /* Audio element timeupdate -> sync */
@@ -2333,28 +2357,106 @@ audio.addEventListener('play', () => {
 });
 
 /* ---------------- File inputs ---------------- */
+function cancelNcmConversion() {
+  audioFileRequestId++;
+  if (ncmWorker) ncmWorker.terminate();
+  ncmWorker = null;
+  songPractice.audioLoading = '';
+}
+
+function failAudioFile(message) {
+  songPractice.audioLoading = '';
+  songPractice.audioError = message;
+  songPractice.audioReady = false;
+  if (songPractice.objectURL) {
+    const url = songPractice.objectURL;
+    songPractice.objectURL = null;
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.load();
+    URL.revokeObjectURL(url);
+    setPlayerVisible(false);
+  }
+  setStatus(message, true);
+  updateSongPracticeUI();
+}
+
+function loadAudioFile(blob, format = '') {
+  songPractice.audioFormat = format;
+  songPractice.objectURL = URL.createObjectURL(blob);
+  songPractice.audioLoading = '正在读取音频，请等待浏览器确认可播放。';
+  audio.src = songPractice.objectURL;
+  audio.preload = 'auto';
+  audio.load();
+  setPlayerVisible(true);
+  setStatus(songPractice.audioLoading);
+  updateSongPracticeUI();
+}
+
 $('#audio-file').addEventListener('change', (e) => {
   const f = e.target.files[0];
   if (!f) return;
+  e.target.value = '';
+  cancelNcmConversion();
+  const requestId = audioFileRequestId;
   stopSongPractice();
   if (songPractice.enabled) stopStudySpeech();
   audio.pause();
   songPractice.audioReady = false;
   songPractice.audioError = '';
+  songPractice.audioFormat = '';
   songPractice.offset = 0;
   $('#song-practice-offset').value = '0';
   $('#song-practice-offset').removeAttribute('aria-invalid');
   const previousURL = songPractice.objectURL;
-  songPractice.objectURL = URL.createObjectURL(f);
-  switchToAudioMode();
-  audio.src = songPractice.objectURL;
-  audio.preload = 'auto';
+  songPractice.objectURL = null;
+  audio.removeAttribute('src');
   audio.load();
   if (previousURL) URL.revokeObjectURL(previousURL);
+  switchToAudioMode();
   $('#audio-file-name').textContent = f.name;
-  setPlayerVisible(true);
-  setStatus(`正在加载音频: ${f.name}`);
+  setPlayerVisible(false);
+  if (!/\.ncm$/i.test(f.name)) {
+    try { loadAudioFile(f); }
+    catch (error) { failAudioFile(`音频加载失败：${error.message}`); }
+    return;
+  }
+  songPractice.audioLoading = '正在本机转换 NCM，请稍候。';
+  setStatus(songPractice.audioLoading);
   updateSongPracticeUI();
+  try {
+    const worker = new Worker('ncm-worker.js');
+    ncmWorker = worker;
+    worker.onmessage = ({ data }) => {
+      if (requestId !== audioFileRequestId) return;
+      worker.terminate();
+      ncmWorker = null;
+      if (data.error) {
+        failAudioFile(`NCM 转换失败：${data.error}`);
+        return;
+      }
+      if (!audio.canPlayType(data.mime)) {
+        failAudioFile(`NCM 已还原为 ${data.format}，但当前浏览器不支持该格式。`);
+        return;
+      }
+      try {
+        loadAudioFile(new Blob([new Uint8Array(data.buffer, data.offset)], { type: data.mime }), data.format);
+      } catch (error) {
+        failAudioFile(`音频加载失败：${error.message}`);
+      }
+    };
+    worker.onerror = () => {
+      if (requestId !== audioFileRequestId) return;
+      worker.terminate();
+      ncmWorker = null;
+      failAudioFile('NCM 转换组件无法运行，请检查浏览器兼容性或重新加载页面。');
+    };
+    worker.onmessageerror = worker.onerror;
+    worker.postMessage(f);
+  } catch (error) {
+    cancelNcmConversion();
+    failAudioFile(`无法启动本机 NCM 转换：${error.message}`);
+  }
 });
 
 $('#lrc-file').addEventListener('change', async (e) => {
@@ -3198,6 +3300,10 @@ function switchToAudioMode() {
 }
 
 async function switchToYouTubeMode(videoId) {
+  if (ncmWorker) {
+    cancelNcmConversion();
+    setStatus('已取消 NCM 转换。');
+  }
   stopSongPractice();
   player.mode = 'yt';
   audio.pause();
@@ -3227,6 +3333,7 @@ async function switchToYouTubeMode(videoId) {
 }
 
 function switchToTimerMode() {
+  if (ncmWorker) cancelNcmConversion();
   stopSongPractice();
   player.mode = 'timer';
   audio.pause();

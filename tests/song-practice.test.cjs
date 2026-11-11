@@ -50,6 +50,8 @@ function fixture() {
     paused: true, ended: false, seeking: false, error: null, readyState: 4, src: 'blob:test',
     play() { this.paused = false; return Promise.resolve(); },
     pause() { this.paused = true; },
+    removeAttribute() { this.src = ''; },
+    load() {},
   });
   const songPractice = {
     initialized: true, enabled: true, timeline: 'synced', audioReady: true,
@@ -65,7 +67,7 @@ function fixture() {
     lrcLines: [], lyricLoadRequestId: 0, marumaruSearchRequestId: 0, renderGeneration: 0,
     lyricTextTimeline: null,
     stopStudySpeech() { context.speechStops++; },
-    speechStops: 0, setStatus() {},
+    speechStops: 0, setStatus() {}, setPlayerVisible() {}, performance,
     setTimeout(callback, delay) { const id = ++nextId; timers.set(id, { callback, delay }); return id; },
     clearTimeout(id) { timers.delete(id); },
     requestAnimationFrame(callback) { const id = ++nextId; frames.set(id, callback); return id; },
@@ -233,6 +235,23 @@ test('internal seeks survive, native seeks cancel without pausing regular playba
   assert.equal(f.songPractice.active, null);
   assert.equal(f.audio.paused, false);
   assert.equal(f.timers.size, 0);
+});
+
+test('delayed seek events allow normal playback advance but reject unrelated seeks', async () => {
+  const f = fixture();
+  let now = 0;
+  f.context.performance = { now: () => now };
+  f.$('#song-practice-rate').value = '1.5';
+  f.context.startSongPractice(0);
+  await flush();
+  now = 150;
+  f.audio.currentTime = 2.15;
+  f.audio.dispatchEvent(new Event('seeking'));
+  f.audio.dispatchEvent(new Event('seeked'));
+  assert.ok(f.songPractice.active);
+  f.audio.currentTime = 4;
+  f.audio.dispatchEvent(new Event('seeking'));
+  assert.equal(f.songPractice.active, null);
 });
 
 test('native pause, lyric changes, decode errors, hiding and toggle-off cancel practice', async () => {

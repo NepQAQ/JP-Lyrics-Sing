@@ -9,6 +9,16 @@ const start = source.indexOf('/* ---------------- File inputs ---------------- *
 const end = source.indexOf("$('#lrc-file').addEventListener", start);
 assert.ok(start >= 0 && end > start);
 
+test('audio picker allows all files while LRC picker remains filtered', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const audioInput = html.match(/<input\b[^>]*\bid="audio-file"[^>]*>/);
+  const lrcInput = html.match(/<input\b[^>]*\bid="lrc-file"[^>]*>/);
+  assert.ok(audioInput);
+  assert.ok(lrcInput);
+  assert.doesNotMatch(audioInput[0], /\baccept\s*=/i);
+  assert.match(lrcInput[0], /\baccept="\.lrc,\.txt"/);
+});
+
 function fixture() {
   const elements = new Map();
   const $ = selector => {

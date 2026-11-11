@@ -273,6 +273,16 @@ test('native pause, lyric changes, decode errors, hiding and toggle-off cancel p
   }
 });
 
+test('invalid ordinary audio reports a loading error and clears the source', () => {
+  const f = fixture();
+  f.audio.error = new Error('invalid file');
+  f.audio.dispatchEvent(new Event('error'));
+  assert.match(f.songPractice.audioError, /音频加载或解码失败/);
+  assert.equal(f.songPractice.audioReady, false);
+  assert.equal(f.songPractice.objectURL, null);
+  assert.equal(f.audio.src, '');
+});
+
 test('play failure is visible; stale failures cannot stop a newer sentence', async () => {
   const f = fixture();
   let rejectOld;

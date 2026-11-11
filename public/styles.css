@@ -912,6 +912,40 @@ button.primary:hover { filter: brightness(1.08); }
 .lrc-speak-btn {
   display: none;
 }
+.song-practice-toggle,
+.lrc-song-btn { display: none; }
+body.mode-read:not(.app-study) .song-practice-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.song-practice-toggle input,
+.song-practice input[type="checkbox"] { accent-color: var(--accent); }
+.song-practice {
+  flex: 0 0 auto;
+  width: min(920px, calc(100% - 24px));
+  margin: 4px auto;
+  padding: 10px 12px;
+  border-radius: 14px;
+  max-height: 34vh;
+  overflow: auto;
+}
+.song-practice[hidden] { display: none; }
+.song-practice label { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; }
+.song-practice input[type="number"] { width: 90px; }
+.song-practice select,
+.song-practice input[type="number"],
+.song-practice button { padding: 6px 8px; }
+.song-practice p { margin: 6px 0 0; overflow-wrap: anywhere; }
+#song-practice-status.error { color: var(--danger); }
+.song-practice button:focus-visible,
+.lrc-song-btn:focus-visible,
+.song-practice-toggle:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
 
 .lrc-line {
   position: relative;
@@ -995,6 +1029,20 @@ body.mode-read .lrc-speak-btn {
   justify-content: center;
   font-size: 14px;
 }
+body.mode-read .lrc-line.has-song-practice { padding-right: 96px; }
+body.mode-read .lrc-song-btn:not([hidden]) {
+  position: absolute;
+  top: 10px;
+  right: 52px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.lrc-song-btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
 body.mode-read .lrc-line .romaji,
 body.mode-read .lrc-line .zh { text-align: left; }
 body.mode-read .lrc-line:hover {
@@ -1309,6 +1357,8 @@ body.no-player .lyrics-view { padding-bottom: 32px; }
   }
   body.mode-read .lrc-line { padding-right: 50px; }
   body.mode-read .lrc-speak-btn { right: 8px; }
+  body.mode-read .lrc-line.has-song-practice { padding-right: 90px; }
+  body.mode-read .lrc-song-btn:not([hidden]) { right: 48px; }
   .study-view { padding: 10px 10px 28px; }
   .study-panel { padding: 12px; }
   .study-head { align-items: flex-start; }

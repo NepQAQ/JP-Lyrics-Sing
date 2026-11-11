@@ -69,6 +69,21 @@ let latestMarumaruCandidates = [];
 let kuroshiro = null;
 let kuroshiroReady = null;
 let lrcLines = [];
+let lyricLoadRequestId = 0;
+let lyricTextTimeline = null;
+const songPractice = {
+  initialized: false,
+  enabled: false,
+  timeline: 'unknown',
+  audioReady: false,
+  audioError: '',
+  objectURL: null,
+  offset: 0,
+  active: null,
+  raf: null,
+  endTimer: null,
+  notice: null,
+};
 let activeIdx = -1;
 let translationCache = new Map();
 const assistSearchState = {
@@ -101,6 +116,7 @@ const APP_MODE_KEY = 'jplrc-app-mode';
 const brandModeMenu = $('#brand-mode-menu');
 function applyAppMode(mode) {
   const next = mode === 'study' ? 'study' : 'lyrics';
+  if (songPractice.initialized) stopSongPractice();
   document.body.classList.toggle('app-study', next === 'study');
   if (studyView) studyView.hidden = next !== 'study';
   const btn = $('#btn-app-mode');
@@ -121,6 +137,7 @@ function applyAppMode(mode) {
   stopStudySpeech();
   requestAnimationFrame(syncPanelToggleButton);
   localStorage.setItem(APP_MODE_KEY, next);
+  if (songPractice.initialized) updateSongPracticeUI();
 }
 
 function setBrandModeMenuOpen(open) {
@@ -152,6 +169,7 @@ document.addEventListener('click', (ev) => {
 /* ---------------- Display Mode (sing-along vs read) ---------------- */
 const MODE_KEY = 'jplrc-mode';
 function applyMode(mode) {
+  if (songPractice.initialized) stopSongPractice();
   document.body.classList.toggle('mode-read', mode === 'read');
   const btn = $('#btn-mode');
   if (btn) {
@@ -160,6 +178,7 @@ function applyMode(mode) {
     btn.title = mode === 'read' ? '当前：阅读模式 · 点击切回跟唱' : '当前：跟唱模式 · 点击切到阅读';
   }
   localStorage.setItem(MODE_KEY, mode);
+  if (songPractice.initialized) updateSongPracticeUI();
 }
 applyMode(localStorage.getItem(MODE_KEY) || 'sing');
 $('#btn-mode')?.addEventListener('click', () => {
@@ -652,7 +671,12 @@ function activateSourceTab(target) {
 
 $$('.source-tabs .tab').forEach(btn => {
   btn.addEventListener('click', () => {
+    stopSongPractice();
     activateSourceTab(btn.dataset.tab);
+    if (songPractice.enabled) {
+      if (btn.dataset.tab === 'timer') switchToTimerMode();
+      else if (songPractice.objectURL) switchToAudioMode();
+    }
   });
 });
 
@@ -1138,6 +1162,7 @@ document.addEventListener('click', (ev) => {
 function parseLRC(text) {
   const lines = text.split(/\r?\n/);
   const out = [];
+  const boundaries = [];
   const re = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
   for (const raw of lines) {
     const stamps = [];
@@ -1147,13 +1172,18 @@ function parseLRC(text) {
       const min = parseInt(m[1], 10);
       const sec = parseInt(m[2], 10);
       const ms = m[3] ? parseInt(m[3].padEnd(3, '0').slice(0, 3), 10) : 0;
-      stamps.push(min * 60 + sec + ms / 1000);
+      if (sec < 60) stamps.push(min * 60 + sec + ms / 1000);
     }
     const content = raw.replace(re, '').trim();
+    boundaries.push(...stamps);
     if (!stamps.length || !content) continue;
-    for (const t of stamps) out.push({ time: t, text: content });
+    for (const t of stamps) out.push({ time: t, practiceTime: t, text: content });
   }
   out.sort((a, b) => a.time - b.time);
+  const uniqueBoundaries = [...new Set(boundaries)].sort((a, b) => a - b);
+  for (const line of out) {
+    line.practiceEnd = uniqueBoundaries.find(time => time > line.practiceTime) ?? null;
+  }
   // 避免相同时间戳导致多行同时高亮：给重复时间戳加微小偏移
   for (let i = 1; i < out.length; i++) {
     if (out[i].time <= out[i - 1].time) {
@@ -1262,7 +1292,12 @@ async function fillFuriganaProgressively(targets, generation) {
   }
 }
 
-async function renderLyrics(parsed) {
+async function renderLyrics(parsed, { timeline = 'unknown' } = {}) {
+  stopSongPractice();
+  songPractice.timeline = timeline;
+  songPractice.offset = 0;
+  $('#song-practice-offset').value = '0';
+  $('#song-practice-offset').removeAttribute('aria-invalid');
   const generation = ++renderGeneration;
   resetLyricsScroll();
   lyricsView.innerHTML = '';
@@ -1271,6 +1306,7 @@ async function renderLyrics(parsed) {
   stopKaraokeLoop();
   if (!parsed.length) {
     lyricsView.innerHTML = '<div class="hint-card"><p>未解析到歌词。</p></div>';
+    updateSongPracticeUI();
     return;
   }
 
@@ -1285,6 +1321,7 @@ async function renderLyrics(parsed) {
     el.dataset.idx = i;
     el.innerHTML = `
       <button class="icon-btn lrc-speak-btn" type="button" aria-label="朗读这一句" title="朗读这一句">🔊</button>
+      <button class="icon-btn lrc-song-btn" type="button" aria-label="播放原歌曲这一句" title="播放原歌曲这一句" aria-pressed="false" hidden>▶</button>
       <div class="jp">${p.jpHTML || escapeHTML(p.text)}</div>
       <div class="romaji"></div>
       <div class="zh"></div>
@@ -1292,6 +1329,11 @@ async function renderLyrics(parsed) {
     el.querySelector('.lrc-speak-btn').addEventListener('click', (event) => {
       event.stopPropagation();
       speakJapanese(p.text);
+    });
+    el.querySelector('.lrc-song-btn').addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (songPractice.active?.index === i) stopSongPractice();
+      else startSongPractice(i);
     });
     el.addEventListener('click', () => seekTo(p.time + 0.01));
     lyricsView.appendChild(el);
@@ -1302,6 +1344,7 @@ async function renderLyrics(parsed) {
   bottomSpacer.className = 'lrc-spacer lrc-spacer-bottom';
   lyricsView.appendChild(bottomSpacer);
 
+  updateSongPracticeUI();
   applyToggleClasses();
 
   // 1) 已经有注音/罗马音的行走快速路径，其余行立即用纯文本占位（保证秒出）
@@ -1329,6 +1372,7 @@ async function renderLyrics(parsed) {
       const ln = lrcLines[i];
       if (ln.zh) continue;
       const zh = await translateToZh(ln.text);
+      if (generation !== renderGeneration) return;
       ln.zh = zh;
       ln.el.querySelector('.zh').textContent = zh;
       if (i % 5 === 0) setStatus(`翻译中 ${i + 1}/${lrcLines.length}...`);
@@ -1519,6 +1563,10 @@ async function getJapaneseTtsProviders(text) {
 
 function playStudyAudio(url, runId) {
   return new Promise((resolve, reject) => {
+    if (runId !== studySpeechRunId) {
+      reject(new Error('朗读已取消'));
+      return;
+    }
     const audioEl = new Audio(url);
     studySpeechAudio = audioEl;
     audioEl.preload = 'auto';
@@ -1534,8 +1582,9 @@ function playStudyAudio(url, runId) {
   });
 }
 
-async function speakJapaneseWithBrowser(text) {
+async function speakJapaneseWithBrowser(text, runId) {
   const voice = await getJapaneseVoiceAsync();
+  if (runId !== studySpeechRunId) throw new Error('朗读已取消');
   if (!voice) throw new Error('没有可用的日语语音');
   return new Promise((resolve, reject) => {
     if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
@@ -1558,6 +1607,8 @@ async function speakJapaneseWithBrowser(text) {
 async function speakJapanese(text) {
   const sourceText = String(text || '').trim();
   if (!sourceText) return;
+  stopSongPractice();
+  if (songPractice.enabled) audio.pause();
   stopStudySpeech();
   const runId = studySpeechRunId;
   const chunks = buildJapaneseTtsChunks(sourceText);
@@ -1568,6 +1619,7 @@ async function speakJapanese(text) {
     const chunk = chunks[i];
     let played = false;
     const providers = await getJapaneseTtsProviders(chunk);
+    if (runId !== studySpeechRunId) return;
     for (const provider of providers) {
       try {
         setStudyStatus(`日语朗读中 ${i + 1}/${chunks.length}：${provider.name}`);
@@ -1581,8 +1633,9 @@ async function speakJapanese(text) {
     if (!played) {
       usedFallback = true;
       try {
-        await speakJapaneseWithBrowser(chunk);
+        await speakJapaneseWithBrowser(chunk, runId);
       } catch (e) {
+        if (runId !== studySpeechRunId) return;
         setStudyStatus('朗读失败：中文区语音接口、VOICEVOX 兜底和浏览器日语语音都不可用。请稍后重试，或在系统/浏览器中安装 Japanese / ja-JP 语音。', true);
         return;
       }
@@ -1694,6 +1747,7 @@ const player = {
     return audio.currentTime || 0;
   },
   seek(t) {
+    stopSongPractice();
     if (this.mode === 'yt' && this.yt && this.ytReady) {
       try { this.yt.seekTo(t, true); this.yt.playVideo(); } catch {}
     } else if (this.mode === 'timer') {
@@ -1740,6 +1794,275 @@ const player = {
 };
 applyAppMode(localStorage.getItem(APP_MODE_KEY) || 'lyrics');
 function seekTo(t) { player.seek(t); }
+
+/* ---------------- Optional reading-mode song practice ---------------- */
+function beginLyricLoad({ preserveTimeline = false } = {}) {
+  stopSongPractice();
+  if (songPractice.enabled) stopStudySpeech();
+  renderGeneration++;
+  marumaruSearchRequestId++;
+  if (!preserveTimeline) songPractice.timeline = 'unknown';
+  updateSongPracticeUI();
+  return ++lyricLoadRequestId;
+}
+
+function getSongPracticeRange(lines, index, duration, offset) {
+  const line = lines[index];
+  if (!line?.text?.trim() || !Number.isFinite(duration) || duration <= 0 || !Number.isFinite(offset)) return null;
+  const rawStart = line.practiceTime ?? line.time;
+  if (!Number.isFinite(rawStart) || rawStart < 0) return null;
+  let rawEnd = Number.isFinite(line.practiceEnd) && line.practiceEnd > rawStart
+    ? line.practiceEnd : Infinity;
+  for (const other of lines) {
+    const time = other.practiceTime ?? other.time;
+    if (Number.isFinite(time) && time > rawStart) rawEnd = Math.min(rawEnd, time);
+  }
+  const start = Math.max(0, rawStart + offset);
+  const end = Math.min(duration, rawEnd === Infinity ? duration : rawEnd + offset);
+  if (end <= start || start >= duration) return null;
+  return { start, end };
+}
+
+function isSongPracticeVisible() {
+  return songPractice.enabled && document.body.classList.contains('mode-read')
+    && !document.body.classList.contains('app-study');
+}
+
+function isSongPracticeReady() {
+  return isSongPracticeVisible() && player.mode === 'audio' && songPractice.audioReady
+    && !audio.error && songPractice.timeline === 'synced' && Number.isFinite(songPractice.offset);
+}
+
+function formatPracticeTime(time) {
+  return `${Math.floor(time / 60)}:${(time % 60).toFixed(2).padStart(5, '0')}`;
+}
+
+function updateSongPracticeUI() {
+  const visible = isSongPracticeVisible();
+  $('#song-practice').hidden = !visible;
+  const ready = isSongPracticeReady();
+  let available = 0;
+  lrcLines.forEach((line, index) => {
+    const button = line.el.querySelector('.lrc-song-btn');
+    if (!button) return;
+    const range = ready ? getSongPracticeRange(lrcLines, index, audio.duration, songPractice.offset) : null;
+    const active = songPractice.active?.index === index;
+    button.hidden = !range;
+    line.el.classList.toggle('has-song-practice', !!range);
+    button.textContent = active ? '■' : '▶';
+    const label = active ? `停止原歌曲第 ${index + 1} 句`
+      : `播放原歌曲第 ${index + 1} 句${range ? `（${formatPracticeTime(range.start)}–${formatPracticeTime(range.end)}）` : ''}`;
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    button.setAttribute('aria-pressed', String(active));
+    if (range) available++;
+  });
+  $('#song-practice-stop').disabled = !songPractice.active;
+  const status = $('#song-practice-status');
+  let message;
+  if (songPractice.audioError) message = songPractice.audioError;
+  else if (!songPractice.objectURL) message = '请在「本地 → 音频」上传歌曲文件；音频仅在本机播放，不做内容识别。';
+  else if (!songPractice.audioReady) message = '正在读取音频，请等待浏览器确认可播放。';
+  else if (player.mode !== 'audio') message = '请切换到「本地 → 音频」音源后练习；计时与视频音源不支持歌曲片段。';
+  else if (songPractice.timeline !== 'synced') {
+    message = songPractice.timeline === 'synthetic'
+      ? '当前是纯文本生成的估算时间轴，不能用于歌曲逐句练习。请搜索同步歌词或导入真实 LRC。'
+      : '尚无可确认来源的同步时间轴。旧缓存需重新搜索同步歌词或导入真实 LRC。';
+  } else if (!Number.isFinite(songPractice.offset)) message = '请输入有效的偏移秒数。';
+  else if (!available) message = '时间轴已载入，但没有落在音频长度内的可用句子，请检查歌词版本或偏移。';
+  else message = `本地音频已关联 · 同步时间轴可用 · ${available}/${lrcLines.length} 句。未识别音频内容，请确认歌曲版本一致；片段止于下一时间标签，最后一句止于音频结束。`;
+  if (songPractice.active) {
+    const { index, start, end } = songPractice.active;
+    message = `原歌曲第 ${index + 1} 句 · ${formatPracticeTime(start)}–${formatPracticeTime(end)} · ${audio.playbackRate}×${$('#song-practice-loop').checked ? ' · 循环' : ''}`;
+  }
+  status.textContent = songPractice.notice?.text || message;
+  status.classList.toggle('error', !!songPractice.notice?.error || !!songPractice.audioError
+    || !Number.isFinite(songPractice.offset));
+}
+
+function clearSongPracticeTimers() {
+  if (songPractice.raf !== null) cancelAnimationFrame(songPractice.raf);
+  if (songPractice.endTimer !== null) clearTimeout(songPractice.endTimer);
+  songPractice.raf = null;
+  songPractice.endTimer = null;
+}
+
+function stopSongPractice({ pause = true } = {}) {
+  const previous = songPractice.active;
+  songPractice.active = null;
+  songPractice.notice = null;
+  clearSongPracticeTimers();
+  if (previous) {
+    if (pause) audio.pause();
+    audio.playbackRate = previous.previousRate;
+    audio.loop = previous.previousLoop;
+  }
+  if (songPractice.initialized) updateSongPracticeUI();
+}
+
+function failSongPractice(error, segment) {
+  if (songPractice.active !== segment) return;
+  stopSongPractice();
+  songPractice.notice = { text: `歌曲片段播放失败：${error.message || error}。请重新点击播放或更换音频。`, error: true };
+  updateSongPracticeUI();
+}
+
+function seekSongPractice(segment) {
+  segment.expectedSeek = segment.start;
+  audio.currentTime = segment.start;
+}
+
+function scheduleSongPracticeEnd() {
+  if (songPractice.endTimer !== null) clearTimeout(songPractice.endTimer);
+  songPractice.endTimer = null;
+  const segment = songPractice.active;
+  if (!segment || audio.paused || audio.seeking) return;
+  const delay = Math.max(4, (segment.end - audio.currentTime) / audio.playbackRate * 1000);
+  songPractice.endTimer = setTimeout(() => {
+    songPractice.endTimer = null;
+    checkSongPracticeBoundary();
+    if (songPractice.active === segment) scheduleSongPracticeEnd();
+  }, Math.min(delay, 2147483647));
+}
+
+async function playSongPracticeAudio(segment) {
+  try {
+    await audio.play();
+    if (songPractice.active !== segment) return;
+    scheduleSongPracticeEnd();
+    updateSongPracticeUI();
+  } catch (error) {
+    failSongPractice(error, segment);
+  }
+}
+
+function checkSongPracticeBoundary() {
+  const segment = songPractice.active;
+  if (!segment || audio.seeking || audio.currentTime < segment.end) return;
+  if ($('#song-practice-loop').checked && isSongPracticeReady()) {
+    try {
+      seekSongPractice(segment);
+      playSongPracticeAudio(segment);
+    } catch (error) { failSongPractice(error, segment); }
+  } else {
+    const end = segment.end;
+    stopSongPractice();
+    audio.currentTime = end;
+  }
+}
+
+function startSongPractice(index) {
+  if (!isSongPracticeReady()) {
+    updateSongPracticeUI();
+    return;
+  }
+  const range = getSongPracticeRange(lrcLines, index, audio.duration, songPractice.offset);
+  if (!range) {
+    songPractice.notice = { text: '这一句没有可播放的音频区间，请检查时间轴与偏移。', error: true };
+    updateSongPracticeUI();
+    return;
+  }
+  stopSongPractice();
+  stopStudySpeech();
+  audio.pause();
+  const segment = {
+    index, ...range, expectedSeek: null,
+    previousRate: audio.playbackRate, previousLoop: audio.loop,
+  };
+  songPractice.active = segment;
+  try {
+    audio.loop = false;
+    audio.playbackRate = Number($('#song-practice-rate').value);
+    seekSongPractice(segment);
+    playSongPracticeAudio(segment);
+    const tick = () => {
+      if (songPractice.active !== segment) return;
+      checkSongPracticeBoundary();
+      if (songPractice.active === segment) songPractice.raf = requestAnimationFrame(tick);
+    };
+    songPractice.raf = requestAnimationFrame(tick);
+    updateSongPracticeUI();
+  } catch (error) { failSongPractice(error, segment); }
+}
+
+$('#enable-song-practice').addEventListener('change', (event) => {
+  stopSongPractice();
+  songPractice.enabled = event.target.checked;
+  updateSongPracticeUI();
+});
+$('#song-practice-hide').addEventListener('click', () => {
+  $('#enable-song-practice').checked = false;
+  songPractice.enabled = false;
+  stopSongPractice();
+  ($('#panel').classList.contains('hidden') ? $('#btn-toggle-panel') : $('#enable-song-practice')).focus();
+});
+$('#song-practice-stop').addEventListener('click', () => stopSongPractice());
+$('#song-practice-rate').addEventListener('change', () => {
+  if (songPractice.active) {
+    audio.playbackRate = Number($('#song-practice-rate').value);
+    scheduleSongPracticeEnd();
+    updateSongPracticeUI();
+  }
+});
+$('#song-practice-loop').addEventListener('change', updateSongPracticeUI);
+$('#song-practice-offset').addEventListener('input', (event) => {
+  stopSongPractice();
+  songPractice.offset = event.target.valueAsNumber;
+  event.target.setAttribute('aria-invalid', String(!Number.isFinite(songPractice.offset)));
+  updateSongPracticeUI();
+});
+audio.addEventListener('loadeddata', () => {
+  if (!songPractice.objectURL || audio.src !== songPractice.objectURL || audio.readyState < 2) return;
+  songPractice.audioReady = !audio.error && Number.isFinite(audio.duration) && audio.duration > 0;
+  songPractice.audioError = songPractice.audioReady ? '' : '音频时长无效，请更换可播放的文件。';
+  setStatus(songPractice.audioError || `已加载音频：${$('#audio-file-name').textContent}`, !!songPractice.audioError);
+  updateSongPracticeUI();
+});
+audio.addEventListener('durationchange', () => {
+  stopSongPractice();
+  if (songPractice.audioReady && (!Number.isFinite(audio.duration) || audio.duration <= 0)) songPractice.audioReady = false;
+  updateSongPracticeUI();
+});
+audio.addEventListener('error', () => {
+  if (!audio.error) return;
+  stopSongPractice();
+  songPractice.audioReady = false;
+  songPractice.audioError = '音频加载或解码失败，请更换浏览器支持的有效音频文件。';
+  setStatus(songPractice.audioError, true);
+  updateSongPracticeUI();
+});
+audio.addEventListener('seeking', () => {
+  const segment = songPractice.active;
+  if (!segment) return;
+  if (segment.expectedSeek === null || Math.abs(audio.currentTime - segment.expectedSeek) > 0.08) {
+    stopSongPractice({ pause: false });
+  }
+});
+audio.addEventListener('seeked', () => {
+  const segment = songPractice.active;
+  if (!segment) return;
+  if (segment.expectedSeek !== null && Math.abs(audio.currentTime - segment.expectedSeek) > 0.08) {
+    stopSongPractice({ pause: false });
+    return;
+  }
+  segment.expectedSeek = null;
+  scheduleSongPracticeEnd();
+});
+audio.addEventListener('pause', () => {
+  if (songPractice.active && audio.paused && !audio.ended) stopSongPractice();
+});
+audio.addEventListener('timeupdate', checkSongPracticeBoundary);
+audio.addEventListener('ended', checkSongPracticeBoundary);
+audio.addEventListener('ratechange', () => {
+  if (songPractice.active) {
+    scheduleSongPracticeEnd();
+    updateSongPracticeUI();
+  }
+});
+window.addEventListener('pagehide', (event) => {
+  stopSongPractice();
+  if (!event.persisted && songPractice.objectURL) URL.revokeObjectURL(songPractice.objectURL);
+});
 
 /* Audio element timeupdate -> sync */
 audio.addEventListener('timeupdate', () => syncHighlight(audio.currentTime));
@@ -2004,6 +2327,7 @@ function centerActiveLyric(el, behavior = 'smooth') {
 }
 
 audio.addEventListener('play', () => {
+  if (songPractice.initialized && songPractice.enabled && !audio.paused) stopStudySpeech();
   setPanelCollapsed(true);
   syncHighlight(audio.currentTime);
 });
@@ -2012,21 +2336,42 @@ audio.addEventListener('play', () => {
 $('#audio-file').addEventListener('change', (e) => {
   const f = e.target.files[0];
   if (!f) return;
+  stopSongPractice();
+  if (songPractice.enabled) stopStudySpeech();
+  audio.pause();
+  songPractice.audioReady = false;
+  songPractice.audioError = '';
+  songPractice.offset = 0;
+  $('#song-practice-offset').value = '0';
+  $('#song-practice-offset').removeAttribute('aria-invalid');
+  const previousURL = songPractice.objectURL;
+  songPractice.objectURL = URL.createObjectURL(f);
   switchToAudioMode();
-  audio.src = URL.createObjectURL(f);
+  audio.src = songPractice.objectURL;
+  audio.preload = 'auto';
+  audio.load();
+  if (previousURL) URL.revokeObjectURL(previousURL);
   $('#audio-file-name').textContent = f.name;
   setPlayerVisible(true);
-  setStatus(`已加载音频: ${f.name}`);
+  setStatus(`正在加载音频: ${f.name}`);
+  updateSongPracticeUI();
 });
 
 $('#lrc-file').addEventListener('change', async (e) => {
   const f = e.target.files[0];
   if (!f) return;
+  const requestId = beginLyricLoad();
   $('#lrc-file-name').textContent = f.name;
-  const text = await f.text();
+  let text;
+  try { text = await f.text(); }
+  catch (error) {
+    if (requestId === lyricLoadRequestId) setStatus(`歌词文件读取失败：${error.message}`, true);
+    return;
+  }
+  if (requestId !== lyricLoadRequestId) return;
   $('#lrc-text').value = text;
   resetAssistActions();
-  loadLrcFromText(text);
+  loadLrcFromText(text, 'synced', requestId);
 });
 
 $('#btn-load-lrc').addEventListener('click', () => {
@@ -2037,22 +2382,31 @@ $('#btn-load-lrc').addEventListener('click', () => {
 });
 
 $('#btn-clear').addEventListener('click', () => {
+  beginLyricLoad();
+  renderGeneration++;
+  lyricTextTimeline = null;
   $('#lrc-text').value = '';
   $('#lrc-file-name').textContent = '未选择 .lrc 文件';
   lyricsView.innerHTML = '<div class="hint-card"><div class="hint-emoji">🧹</div><p>已清空。</p></div>';
   lrcLines = []; activeIdx = -1;
+  updateSongPracticeUI();
   stopKaraokeLoop();
   resetAssistActions();
   setStatus('');
 });
 
-async function loadLrcFromText(text) {
+async function loadLrcFromText(text, timeline = null, requestId = null) {
+  if (requestId === null) requestId = beginLyricLoad();
+  if (requestId !== lyricLoadRequestId) return;
+  // Editing generated/legacy text is not evidence that its timestamps are genuine.
+  const kind = timeline || lyricTextTimeline || 'synced';
+  lyricTextTimeline = kind;
   const parsed = parseLRC(text);
   if (!parsed.length) {
     setStatus('未识别到带时间戳的 LRC 行。', true);
     return;
   }
-  await renderLyrics(parsed);
+  await renderLyrics(parsed, { timeline: kind });
 }
 
 /* ---------------- Online search via lrclib.net ---------------- */
@@ -2117,8 +2471,11 @@ function saveLyricsToCache(item, lrcText) {
       query: searchInput.value.trim(),
     },
     lrc: lrcText || '',
+    timeline: songPractice.timeline,
     lines: lrcLines.map(l => ({
       time: l.time, text: l.text,
+      practiceTime: l.practiceTime ?? l.time,
+      practiceEnd: l.practiceEnd ?? null,
       jpHTML: l.jpHTML || '',
       romaji: l.romaji || '',
       zh: l.zh || '',
@@ -2144,16 +2501,21 @@ function cacheMatchesQuery(entry, q) {
 }
 
 async function loadFromCache(entry) {
+  const requestId = beginLyricLoad();
   searchResults.hidden = true;
   setSearchHistoryOpen(false);
   $('#lrc-text').value = entry.lrc || '';
+  const timeline = ['synced', 'synthetic'].includes(entry.timeline) ? entry.timeline : 'unknown';
+  lyricTextTimeline = timeline;
   const parsed = (entry.lines || []).map(l => ({
     time: l.time, text: l.text,
+    practiceTime: l.practiceTime ?? l.time, practiceEnd: l.practiceEnd ?? null,
     jpHTML: l.jpHTML, romaji: l.romaji, zh: l.zh,
     wordTiming: l.wordTiming, cached: true,
   }));
   setStatus(`从本地缓存载入：${entry.meta?.title || ''} - ${entry.meta?.artist || ''}`);
-  await renderLyrics(parsed);
+  await renderLyrics(parsed, { timeline });
+  if (requestId !== lyricLoadRequestId) return;
   setPanelCollapsed(true);
   if (!entry.lrc) switchToTimerMode();
 }
@@ -2327,6 +2689,7 @@ function buildLrcFromParsed(parsed) {
 }
 
 async function loadFromNetease(item) {
+  const requestId = beginLyricLoad();
   searchResults.hidden = true;
   resetAssistActions();
   setStatus(`正在从网易云载入：${item.title}${item.artist ? ' - ' + item.artist : ''}...`);
@@ -2335,9 +2698,11 @@ async function loadFromNetease(item) {
   try {
     data = await fetchProxyJson(`/api/lyric?id=${encodeURIComponent(item.id)}`, 15000);
   } catch (e) {
+    if (requestId !== lyricLoadRequestId) return;
     setStatus(`网易云载入失败：${e.message}`, true);
     return;
   }
+  if (requestId !== lyricLoadRequestId) return;
 
   const rawLines = Array.isArray(data?.lines) ? data.lines : [];
   if (!rawLines.length) {
@@ -2347,12 +2712,18 @@ async function loadFromNetease(item) {
 
   // 统一结构直接对应 renderLyrics 需要的行结构；wordTiming 已是毫秒级 starttime/endtime
   const parsed = rawLines.map(line => ({
-    time: Number(line.time) || 0,
+    time: Number(line.time),
+    practiceTime: Number(line.time),
+    practiceEnd: Number(line.duration) > 0 ? Number(line.time) + Number(line.duration) : null,
     text: line.text || '',
     zh: line.zh || '',
     romaji: line.romaji || '',
     wordTiming: Array.isArray(line.wordTiming) && line.wordTiming.length ? line.wordTiming : null,
-  }));
+  })).filter(line => Number.isFinite(line.time) && line.time >= 0);
+  if (!parsed.length) {
+    setStatus('该结果没有有效的歌词时间标签', true);
+    return;
+  }
   const meta = {
     id: `ne-${data.id || item.id}`,
     trackName: data.title || item.title || '',
@@ -2363,10 +2734,13 @@ async function loadFromNetease(item) {
 
   const lrcText = buildLrcFromParsed(parsed);
   $('#lrc-text').value = lrcText;
+  lyricTextTimeline = 'synced';
   startAssistActionsForLyric(meta);
   // 先收起面板露出歌词，再渲染（注音在后台补，不能挡住首屏）
   setPanelCollapsed(true);
-  await renderLyrics(parsed);
+  await renderLyrics(parsed, { timeline: 'synced' });
+  if (requestId !== lyricLoadRequestId) return;
+  const targetLines = lrcLines;
 
   const wordLines = parsed.filter(line => line.wordTiming).length;
   setStatus(
@@ -2381,9 +2755,9 @@ async function loadFromNetease(item) {
   if (!wordLines) {
     tasks.push((async () => {
       const plLines = await fetchPetitLyricsWordTiming(meta.trackName, meta.artistName);
-      if (!plLines) return;
-      matchPetitLyricsToLrc(plLines, lrcLines);
-      const matched = lrcLines.filter(line => line.wordTiming).length;
+      if (!plLines || requestId !== lyricLoadRequestId) return;
+      matchPetitLyricsToLrc(plLines, targetLines);
+      const matched = targetLines.filter(line => line.wordTiming).length;
       if (matched) setStatus(`已载入：${meta.trackName} · PetitLyrics 逐字时间轴已匹配 ${matched}/${lrcLines.length} 行`);
     })());
   }
@@ -2745,6 +3119,7 @@ function matchPetitLyricsToLrc(plLines, lrcArr) {
 }
 
 async function loadFromLrclib(item) {
+  const requestId = beginLyricLoad();
   searchResults.hidden = true;
   const syncedLrc = item.syncedLyrics || '';
   const plainLyrics = item.plainLyrics || '';
@@ -2754,16 +3129,18 @@ async function loadFromLrclib(item) {
   startAssistActionsForLyric(item);
   setStatus(`${syncedLrc ? '已载入' : '已载入纯文本歌词'}：${item.trackName} - ${item.artistName}；正在后台搜索 Marumaru 注音与逐字时间轴...`);
   setPanelCollapsed(true);
-  await loadLrcFromText(lrc);
+  await loadLrcFromText(lrc, syncedLrc ? 'synced' : 'synthetic', requestId);
+  if (requestId !== lyricLoadRequestId) return;
+  const targetLines = lrcLines;
   if (!syncedLrc) switchToTimerMode();
   Promise.allSettled([
     // LRCLIB 没有中文翻译，Marumaru 找到后自动补充注音与中文
     prefetchMarumaruCandidatesForLyric(item, { autoApply: true }),
     (async () => {
       const plLines = await fetchPetitLyricsWordTiming(item.trackName, item.artistName);
-      if (plLines) {
-        matchPetitLyricsToLrc(plLines, lrcLines);
-        const matched = lrcLines.filter(l => l.wordTiming).length;
+      if (plLines && requestId === lyricLoadRequestId) {
+        matchPetitLyricsToLrc(plLines, targetLines);
+        const matched = targetLines.filter(l => l.wordTiming).length;
         console.log('[PetitLyrics] 匹配结果: ' + matched + '/' + lrcLines.length + ' 行');
         if (matched > 0) {
           const sample = lrcLines.find(l => l.wordTiming);
@@ -2774,7 +3151,9 @@ async function loadFromLrclib(item) {
         }
       }
     })(),
-  ]).then(() => saveLyricsToCache(item, lrc));
+  ]).then(() => {
+    if (requestId === lyricLoadRequestId) saveLyricsToCache(item, lrc);
+  });
 }
 
 /* ---------------- YouTube ---------------- */
@@ -2806,6 +3185,7 @@ function loadYouTubeAPI() {
 }
 
 function switchToAudioMode() {
+  stopSongPractice();
   player.mode = 'audio';
   stopPolling();
   hideTimerHud();
@@ -2814,12 +3194,15 @@ function switchToAudioMode() {
   if (player.yt) { try { player.yt.stopVideo(); } catch {} }
   // Only show player bar if an audio file is actually loaded
   setPlayerVisible(!!audio.src);
+  updateSongPracticeUI();
 }
 
 async function switchToYouTubeMode(videoId) {
+  stopSongPractice();
   player.mode = 'yt';
   audio.pause();
   audio.style.display = 'none';
+  updateSongPracticeUI();
   const yw = $('#yt-wrap'); if (yw) yw.hidden = false;
   hideTimerHud();
   await loadYouTubeAPI();
@@ -2844,6 +3227,7 @@ async function switchToYouTubeMode(videoId) {
 }
 
 function switchToTimerMode() {
+  stopSongPractice();
   player.mode = 'timer';
   audio.pause();
   audio.style.display = 'none';
@@ -2855,6 +3239,7 @@ function switchToTimerMode() {
   setPlayerVisible(false);  // timer mode doesn't need the audio bar
   startPolling();
   setStatus('计时模式：在外部播放器开始的同时点 ▶ 启动。');
+  updateSongPracticeUI();
 }
 
 /* ---------------- Timer HUD ---------------- */
@@ -2893,7 +3278,8 @@ $('#btn-timer-fwd').addEventListener('click', () => player.timerNudge(+0.5));
 // Spacebar to toggle in timer mode
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Space' && player.mode === 'timer' &&
-      !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) {
+      !['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(document.activeElement?.tagName) &&
+      !document.activeElement?.isContentEditable) {
     e.preventDefault();
     player.timerToggle();
   }
@@ -3207,6 +3593,7 @@ function buildTimedLinesFromMarumaru(lines, stepSeconds = 4) {
 }
 
 async function applyMarumaruToCurrentLyrics(data) {
+  const generation = renderGeneration;
   const byText = new Map();
   for (const line of data.lines) {
     const key = normalizeLyricText(line.text);
@@ -3226,6 +3613,7 @@ async function applyMarumaruToCurrentLyrics(data) {
     if (!ln.romaji && kuroshiro) {
       try {
         const generated = await toFurigana(ln.text);
+        if (generation !== renderGeneration) return 0;
         if (generated.romaji) ln.romaji = generated.romaji;
       } catch {}
     }
@@ -3242,9 +3630,12 @@ async function applyMarumaruToCurrentLyrics(data) {
 }
 
 async function loadFromMarumaru(item) {
+  const timeline = songPractice.timeline;
+  const requestId = beginLyricLoad({ preserveTimeline: true });
   setStatus(`Marumaru 载入：${item.title}...`);
   try {
     const data = await fetchMarumaruLyric(item);
+    if (requestId !== lyricLoadRequestId) return;
     const parsed = marumaruParseLyricData(data);
     if (!parsed.lines.length) {
       setStatus('Marumaru 页面未能解析出歌词', true);
@@ -3256,26 +3647,32 @@ async function loadFromMarumaru(item) {
     const lrcText = $('#lrc-text').value;
     if (lrcText.trim() && lrcLines.length) {
       const applied = await applyMarumaruToCurrentLyrics(parsed);
+      if (requestId !== lyricLoadRequestId) return;
       if (applied) {
         applyToggleClasses();
         setStatus(`Marumaru ✓ 已应用 ${applied} 行注音/罗马音/中文，学到 ${added} 个新读音。`);
       } else {
         setStatus(`Marumaru ✓ 学到 ${added} 个新读音，未找到可直接匹配的同步歌词行，正在重新渲染本地注音...`);
-        await loadLrcFromText(lrcText);
+        await loadLrcFromText(lrcText, timeline, requestId);
       }
     } else {
       const fakeLrc = buildFakeLrcFromPlainText(parsed.lines.map(line => line.text).join('\n'));
       $('#lrc-text').value = fakeLrc;
-      await renderLyrics(buildTimedLinesFromMarumaru(parsed.lines));
+      lyricTextTimeline = 'synthetic';
+      await renderLyrics(buildTimedLinesFromMarumaru(parsed.lines), { timeline: 'synthetic' });
+      if (requestId !== lyricLoadRequestId) return;
       switchToTimerMode();
       setStatus(`Marumaru ✓ 已显示歌词、注音、罗马音和中文翻译（无时间轴，请使用计时模式）。`);
     }
   } catch (e) {
+    if (requestId !== lyricLoadRequestId) return;
     setStatus(`Marumaru 载入失败：${e.message}`, true);
   }
 }
 
 /* ---------------- Init: warm up kuroshiro on first interaction ---------------- */
+songPractice.initialized = true;
+updateSongPracticeUI();
 let warmed = false;
 
 function formatKuroshiroInitError(err) {

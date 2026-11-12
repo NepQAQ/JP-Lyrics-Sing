@@ -504,6 +504,21 @@
   </div>
 </dialog>
 
+<dialog id="dlg-audio-reuse" class="dlg" aria-labelledby="ar-h">
+  <div class="dlg-head">
+    <h3 id="ar-h">发现云端已有这首歌的音频</h3>
+    <button class="icon-btn" type="button" aria-label="关闭" onclick="this.closest('dialog').close()">×</button>
+  </div>
+  <div class="dlg-body">
+    <p>云端已有《<b id="audio-reuse-title">未知歌曲</b> - <b id="audio-reuse-artist">未知歌手</b>》的音频（其他用户上传过）。要直接使用这份云端副本吗？</p>
+    <p class="muted small">使用云端副本可避免重复上传；本机已有的音频不受影响，仍可正常播放。</p>
+  </div>
+  <div class="dlg-foot">
+    <button id="audio-reuse-own" class="btn ghost" type="button">自己上传</button>
+    <button id="audio-reuse-cloud" class="btn primary" type="button">使用云端副本</button>
+  </div>
+</dialog>
+
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="lib/kuromoji.js"></script>

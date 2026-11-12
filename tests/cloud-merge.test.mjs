@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mergeSongs, mergeDictionary, mergeConfig, parseJsonSafe, audioSig, songsNeedingAudioUpload } from '../public/js/cloud.js';
+import { mergeSongs, mergeDictionary, mergeConfig, parseJsonSafe, audioSig, songsNeedingAudioUpload, resolvePushAudioPath } from '../public/js/cloud.js';
 
 const song = (id, updatedAt) => ({ id, updatedAt, title: `t-${id}` });
 const remote = (songId, updatedAt) => ({ songId, updatedAt, title: `t-${songId}` });
@@ -158,4 +158,48 @@ test('songsNeedingAudioUpload：空 sigs（sharepoint 翻转场景）→ 全部�
 test('songsNeedingAudioUpload：空输入与脏数据安全', () => {
   assert.deepEqual(songsNeedingAudioUpload(null, null), []);
   assert.deepEqual(songsNeedingAudioUpload([null, { audio: { size: 1, mime: 'm', name: 'n' } }], {}), []);
+});
+
+// ---------------------------------------------------------------- resolvePushAudioPath
+
+const SIG = '100:audio/mpeg:song.mp3';
+const SIG2 = '200:audio/mpeg:new-song.mp3';
+
+test('resolvePushAudioPath：首次上传前（无决策无签名）→ null，不发路径', () => {
+  assert.equal(resolvePushAudioPath({ sig: SIG, uid: 'u1', id: 's1', decisions: {}, sigs: {} }), null);
+});
+
+test('resolvePushAudioPath：已上传过（签名一致）→ 自己的路径', () => {
+  assert.equal(
+    resolvePushAudioPath({ sig: SIG, uid: 'u1', id: 's1', decisions: {}, sigs: { s1: SIG } }),
+    'Songs/u1/s1'
+  );
+});
+
+test('resolvePushAudioPath：云端副本决策（sig 一致）→ 共享路径', () => {
+  const decisions = { s1: { sig: SIG, choice: 'cloud', path: 'Songs/other/song-x' } };
+  assert.equal(resolvePushAudioPath({ sig: SIG, uid: 'u1', id: 's1', decisions, sigs: {} }), 'Songs/other/song-x');
+});
+
+test('resolvePushAudioPath：自己上传决策（sig 一致）→ 自己的路径', () => {
+  const decisions = { s1: { sig: SIG, choice: 'own' } };
+  assert.equal(resolvePushAudioPath({ sig: SIG, uid: 'u1', id: 's1', decisions, sigs: {} }), 'Songs/u1/s1');
+});
+
+test('resolvePushAudioPath：决策 sig 过期（文件更换）→ 重新走首传流程', () => {
+  const decisions = { s1: { sig: SIG, choice: 'cloud', path: 'Songs/other/song-x' } };
+  // 新 sig 与决策不符、与已上传签名也不符 → null（触发查重/上传流程）
+  assert.equal(resolvePushAudioPath({ sig: SIG2, uid: 'u1', id: 's1', decisions, sigs: { s1: SIG } }), null);
+});
+
+test('resolvePushAudioPath：无音频 / 缺 uid / 缺 id → null', () => {
+  assert.equal(resolvePushAudioPath({ sig: null, uid: 'u1', id: 's1', decisions: {}, sigs: {} }), null);
+  assert.equal(resolvePushAudioPath({ sig: SIG, uid: null, id: 's1', decisions: {}, sigs: {} }), null);
+  assert.equal(resolvePushAudioPath({ sig: SIG, uid: 'u1', id: null, decisions: {}, sigs: {} }), null);
+  assert.equal(resolvePushAudioPath({}), null);
+});
+
+test('resolvePushAudioPath：cloud 决策缺 path（脏数据）→ 不发共享路径', () => {
+  const decisions = { s1: { sig: SIG, choice: 'cloud' } };
+  assert.equal(resolvePushAudioPath({ sig: SIG, uid: 'u1', id: 's1', decisions, sigs: {} }), null);
 });

@@ -22,7 +22,7 @@ import {
   dvDelete,
   odataQuote,
 } from './dataverse.js';
-import { isSharePointConfigured, putAudio, getAudio, deleteAudio } from './graph.js';
+import { isSharePointConfigured, putAudio, getAudio, deleteAudio, isSafeAudioPath } from './graph.js';
 
 const MAX_JSON_BYTES = 2 * 1024 * 1024; // 歌词/配置 JSON（Dataverse 多行文本列上限 1MB + 余量）
 const MAX_AUDIO_BYTES = 50 * 1024 * 1024; // 原始二进制音频
@@ -145,6 +145,8 @@ async function route(request, url, env, ctx, path) {
     if (method === 'PUT') return handlePutSong(request, url, env, songId);
     if (method === 'DELETE') return handleDeleteSong(request, url, env, songId);
   }
+
+  if (path === '/api/cloud/audio/lookup' && method === 'GET') return handleAudioLookup(request, url, env);
 
   if (path === '/api/cloud/audio') {
     if (method === 'PUT') return handlePutAudio(request, url, env);
@@ -427,13 +429,18 @@ async function handlePutSong(request, url, env, songId) {
   const clientUpdatedAt = Number(body?.updatedAt);
   const updatedAt = String(Number.isFinite(clientUpdatedAt) && clientUpdatedAt > 0 ? clientUpdatedAt : Date.now());
 
+  // audio_path 白名单校验：非法路径（越出 Songs/ 的任意路径）一律清空，
+  // 保证行内 audio_path 可靠表示「云端存在音频及其位置」
+  const audioPathRaw = String(body?.audioPath ?? '');
+  const audioPath = isSafeAudioPath(audioPathRaw) ? audioPathRaw : '';
+
   const data = {
     [s.song.songId]: songId,
     [s.song.title]: clampStr(body?.title, 200),
     [s.song.artist]: clampStr(body?.artist, 200),
     [s.song.badges]: badges,
     [s.song.lyricJson]: lyricJson,
-    [s.song.audioPath]: clampStr(body?.audioPath, 400),
+    [s.song.audioPath]: audioPath,
     [s.song.updatedAt]: updatedAt,
   };
 
@@ -467,19 +474,24 @@ async function handleDeleteSong(request, url, env, songId) {
   const s = schema(env);
   const rows = await dvQueryAll(env, s.song.table, {
     filter: songFilter(s, songId, uid),
-    select: [s.song.id],
+    select: [s.song.id, s.song.audioPath],
   });
 
   if (!rows.length) throw new ApiError(404, 'SONG_NOT_FOUND', '云端不存在该歌曲');
+
+  // 行内路径优先（可能指向共享副本），校验失败回退构造路径
+  const rowPath = rows.map((r) => r[s.song.audioPath]).find((p) => isSafeAudioPath(p));
+  const path = rowPath || `Songs/${uid}/${songId}`;
 
   for (const row of rows) {
     await dvDelete(env, s.song.table, row[s.song.id]);
   }
 
-  // 尽力清理 SharePoint 上的音频（未配置或失败不影响删除结果）
+  // 尽力清理 SharePoint 上的音频（未配置或失败不影响删除结果）；
+  // 其他用户的行仍引用该路径（共享副本）时保留 blob
   if (isSharePointConfigured(env)) {
     try {
-      await deleteAudio(env, uid, songId);
+      await deleteAudioIfUnreferenced(env, s, path, uid);
     } catch (error) {
       console.warn('[cloud] audio cleanup skipped:', error?.message || error);
     }
@@ -519,9 +531,9 @@ async function handlePutAudio(request, url, env) {
   if (!mime) throw new ApiError(400, 'BAD_REQUEST', '缺少音频 MIME 类型');
   if (!data || data.byteLength === 0) throw new ApiError(400, 'BAD_REQUEST', '缺少音频数据');
 
-  await putAudio(env, uid, songId, data, mime);
-
   const path = `Songs/${uid}/${songId}`;
+  await putAudio(env, path, data, mime);
+
   // 尽力更新歌曲行的 audio_path（歌曲行可能尚未创建）
   try {
     const s = schema(env);
@@ -547,23 +559,26 @@ async function handleGetAudio(request, url, env) {
   const songId = url.searchParams.get('songId');
   assertSongId(songId);
 
-  // MIME 解析优先级：查询参数 → 歌曲行 badges.audio.mime → Graph 响应头 → 兜底
+  // 一次查询同时取 badges（MIME 兜底）与行内 audio_path（行驱动路径）
   let mime = url.searchParams.get('mime') || '';
-  if (!mime) {
-    try {
-      const s = schema(env);
-      const row = await dvQueryOne(env, s.song.table, {
-        filter: songFilter(s, songId, uid),
-        select: [s.song.badges],
-      });
+  let path = `Songs/${uid}/${songId}`;
+  try {
+    const s = schema(env);
+    const row = await dvQueryOne(env, s.song.table, {
+      filter: songFilter(s, songId, uid),
+      select: [s.song.badges, s.song.audioPath],
+    });
+    if (!mime) {
       const badges = parseJsonSafe(row?.[s.song.badges]);
       mime = badges?.audio?.mime || '';
-    } catch {
-      // 查询失败不阻断下载
     }
+    const rowPath = row?.[s.song.audioPath];
+    if (isSafeAudioPath(rowPath)) path = rowPath; // 共享副本路径
+  } catch {
+    // 查询失败不阻断下载，回退构造路径
   }
 
-  const upstream = await getAudio(env, uid, songId);
+  const upstream = await getAudio(env, path);
   const headers = new Headers({
     'Content-Type': mime || upstream.headers.get('Content-Type') || 'audio/mpeg',
     'Cache-Control': 'private, max-age=3600',
@@ -581,23 +596,73 @@ async function handleDeleteAudio(request, url, env) {
   const songId = url.searchParams.get('songId');
   assertSongId(songId);
 
-  await deleteAudio(env, uid, songId);
+  const s = schema(env);
+  const rows = await dvQueryAll(env, s.song.table, {
+    filter: songFilter(s, songId, uid),
+    select: [s.song.id, s.song.audioPath],
+  });
 
-  // 尽力清空歌曲行的 audio_path
-  try {
-    const s = schema(env);
-    const rows = await dvQueryAll(env, s.song.table, {
-      filter: songFilter(s, songId, uid),
-      select: [s.song.id],
-    });
-    if (rows.length) {
-      await dvUpdate(env, s.song.table, rows[0][s.song.id], { [s.song.audioPath]: null });
+  // 行内路径优先（可能指向共享副本），校验失败回退构造路径
+  const rowPath = rows.map((r) => r[s.song.audioPath]).find((p) => isSafeAudioPath(p));
+  const path = rowPath || `Songs/${uid}/${songId}`;
+
+  // 先清本行 audio_path，再按引用计数决定是否删除云端 blob
+  for (const row of rows) {
+    if (row[s.song.audioPath] != null) {
+      try {
+        await dvUpdate(env, s.song.table, row[s.song.id], { [s.song.audioPath]: null });
+      } catch (error) {
+        console.warn('[cloud] audio_path clear skipped:', error?.message || error);
+      }
     }
-  } catch (error) {
-    console.warn('[cloud] audio_path clear skipped:', error?.message || error);
+  }
+
+  if (isSharePointConfigured(env)) {
+    try {
+      await deleteAudioIfUnreferenced(env, s, path, uid);
+    } catch (error) {
+      console.warn('[cloud] audio cleanup skipped:', error?.message || error);
+    }
   }
 
   return jsonResponse({ ok: true }, { request, env, cors: CLOUD_CORS });
+}
+
+// ---------------------------------------------------------------------------
+// 音频查重（跨用户共享副本）
+// ---------------------------------------------------------------------------
+
+async function handleAudioLookup(request, url, env) {
+  assertDataverseConfigured(env);
+  const claims = await requireUser(request, env);
+  const uid = assertGuid(claims.uid);
+
+  const title = String(url.searchParams.get('title') || '');
+  const artist = String(url.searchParams.get('artist') || '');
+  const key = lookupKey(title, artist);
+  if (!key) return jsonResponse({ found: false }, { request, env, cors: CLOUD_CORS });
+
+  const s = schema(env);
+  const rows = await dvQueryAll(env, s.song.table, {
+    filter: `${s.song.audioPath} ne null`,
+    select: [s.song.title, s.song.artist, s.song.audioPath, s.song.ownerValue],
+  });
+
+  for (const row of rows) {
+    if (row[s.song.ownerValue] === uid) continue; // 排除自己的行
+    if (lookupKey(row[s.song.title], row[s.song.artist]) !== key) continue;
+    return jsonResponse(
+      {
+        found: true,
+        title: String(row[s.song.title] || ''),
+        artist: String(row[s.song.artist] || ''),
+        audioPath: String(row[s.song.audioPath] || ''),
+      },
+      { request, env, cors: CLOUD_CORS }
+    );
+  }
+
+  return jsonResponse({ found: false }, { request, env, cors: CLOUD_CORS });
 }
 
 // ---------------------------------------------------------------------------
@@ -724,6 +789,31 @@ function parseJsonSafe(value) {
 
 function clampStr(value, max) {
   return String(value ?? '').slice(0, max);
+}
+
+// 查重匹配键：规范化 title+artist（trim、小写、压缩空白）
+export function normalizeLookupKey(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function lookupKey(title, artist) {
+  const t = normalizeLookupKey(title);
+  const a = normalizeLookupKey(artist);
+  return a ? `${t} ${a}` : t;
+}
+
+// 引用计数：其他用户的行仍引用该路径（共享副本）时保留 blob，返回 false
+async function deleteAudioIfUnreferenced(env, s, path, uid) {
+  const refs = await dvQueryAll(env, s.song.table, {
+    filter: `${s.song.audioPath} eq '${odataQuote(path)}'`,
+    select: [s.song.ownerValue],
+  });
+  if (refs.some((row) => row[s.song.ownerValue] !== uid)) return false;
+  await deleteAudio(env, path);
+  return true;
 }
 
 function decodeURIComponentSafe(text) {

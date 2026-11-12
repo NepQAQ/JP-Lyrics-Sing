@@ -9,6 +9,7 @@ import { authFetch, authToken, authUser, isLoggedIn } from './auth.js';
 const PUSH_DEBOUNCE_MS = 3000;
 const RETRY_DELAY_MS = 30000;
 const AUDIO_SIG_PREFIX = 'jls-cloud-audio-sig';
+const AUDIO_DECISION_PREFIX = 'jls-cloud-audio-decision';
 const BACKLOG_DECLINED_PREFIX = 'jls-cloud-backlog-declined';
 
 let cloudStatus = null; // { dataverse, auth, sharepoint } | null
@@ -114,6 +115,24 @@ export function songsNeedingAudioUpload(songs, sigs) {
     if (sig && sigs?.[song.id] !== sig) out.push(song.id);
   }
   return out;
+}
+
+/**
+ * pushSong 应发送的 audioPath：
+ * - 已记录「使用云端副本」决策（sig 一致）→ 共享路径
+ * - 已记录「自己上传」决策或本地签名表明已上传过（sig 一致）→ 自己的路径
+ * - 首次上传前 → null（不发，PUT audio 成功后由 Worker 回写行内路径）
+ * audio_path 由此可靠表示「云端存在音频及其位置」，查重不会命中幽灵路径。
+ */
+export function resolvePushAudioPath({ sig, uid, id, decisions, sigs }) {
+  if (!sig || !uid || !id) return null;
+  const decision = decisions?.[id];
+  if (decision?.sig === sig) {
+    if (decision.choice === 'cloud' && decision.path) return decision.path;
+    if (decision.choice === 'own') return `Songs/${uid}/${id}`;
+  }
+  if (sigs?.[id] === sig) return `Songs/${uid}/${id}`;
+  return null;
 }
 
 // =============================================================== 初始化
@@ -340,6 +359,7 @@ async function downloadMissingAudio() {
  * 补传本地音频：sharepoint 配置后（含会话期间状态翻转）扫描签名缺失/变化的
  * 歌曲自动上传。未配置期间不记录签名，翻转后此处把全部本地音频补传一遍；
  * 已上传的（签名一致）自动跳过，维持「上传一次」语义。
+ * 统一走 syncAudioForSong 的查重决策流程（命中其他用户副本时弹窗询问）。
  */
 async function uploadMissingAudio() {
   if (!isLoggedIn() || !cloudStatus?.sharepoint) return 0;
@@ -352,11 +372,9 @@ async function uploadMissingAudio() {
     const record = await api.getAudioBlob(id);
     if (!record?.blob) continue; // 本地无音频数据（仅元数据），跳过
     try {
-      await putCloudAudio(id, record.blob, song.audio.mime);
-      const sigs = loadAudioSigs();
-      sigs[id] = audioSig(song);
-      saveAudioSigs(sigs);
-      count++;
+      await syncAudioForSong(id, song);
+      // 上传或复用云端副本均视为处理完成（签名已记录）
+      if (loadAudioSigs()[id] === audioSig(song)) count++;
     } catch {
       // 单曲失败跳过，下次「立即同步」重试
     }
@@ -475,14 +493,24 @@ async function pushSong(id) {
       badges: JSON.stringify(badges),
       lyricJson: JSON.stringify(song),
       updatedAt: song.updatedAt || Date.now(),
-      audioPath: song.audio && uid ? `Songs/${uid}/${id}` : null,
+      audioPath: resolvePushAudioPath({
+        sig: audioSig(song),
+        uid,
+        id,
+        decisions: loadAudioDecisions(),
+        sigs: loadAudioSigs(),
+      }),
     },
   });
 
   await syncAudioForSong(id, song);
 }
 
-/** 音频只上传一次：签名（size:mime:name）变化才重传；删除音频时清理云端。 */
+/**
+ * 音频只上传一次：签名（size:mime:name）变化才重传；删除音频时清理云端。
+ * 上传前查重：云端已有其他用户上传的同名歌曲音频时，询问是否直接复用
+ * 云端副本（决策按 songId:sig 记忆，文件更换后重新走流程）。
+ */
 async function syncAudioForSong(id, song) {
   const sigs = loadAudioSigs();
   const sig = audioSig(song);
@@ -504,11 +532,50 @@ async function syncAudioForSong(id, song) {
   }
 
   if (sigs[id] === sig || !cloudStatus?.sharepoint) return;
+
+  const choice = await resolveAudioDecision(id, song, sig);
+  if (choice === 'cloud') {
+    // 使用云端共享副本：记录签名防止自动重传，重推歌曲行带上共享 audioPath
+    // （决策已存、签名已一致，pushSong 内的 syncAudioForSong 不会递归）
+    sigs[id] = sig;
+    saveAudioSigs(sigs);
+    await pushSong(id);
+    return;
+  }
+
   const record = await api.getAudioBlob(id);
   if (!record?.blob) return; // 本地无音频数据（仅元数据），跳过
   await putCloudAudio(id, record.blob, song.audio.mime);
   sigs[id] = sig;
   saveAudioSigs(sigs);
+}
+
+/** 查重决策：已有决策（sig 一致）直接沿用；否则查云端并按需弹窗询问。 */
+async function resolveAudioDecision(id, song, sig) {
+  const decisions = loadAudioDecisions();
+  const existing = decisions[id];
+  if (existing?.sig === sig && (existing.choice === 'cloud' || existing.choice === 'own')) {
+    return existing.choice;
+  }
+
+  let hit = null;
+  try {
+    hit = await lookupCloudAudio(song.title, song.artist);
+  } catch {
+    // 查重失败不阻断上传
+  }
+  if (!hit?.found) return 'own'; // 云端无匹配：正常上传
+
+  const choice = await confirmReuseCloudAudio(hit);
+  if (choice === 'cloud') {
+    saveAudioDecisions({ ...decisions, [id]: { sig, choice: 'cloud', path: hit.audioPath } });
+    return 'cloud';
+  }
+  if (choice === 'own') {
+    saveAudioDecisions({ ...decisions, [id]: { sig, choice: 'own' } });
+    return 'own';
+  }
+  return 'own'; // 关闭弹窗：不存决策，本次按自己上传
 }
 
 async function pushSongDelete(id) {
@@ -587,6 +654,72 @@ function saveAudioSigs(map) {
   } catch {
     // 存储失败时退化为每次都重传
   }
+}
+
+// =============================================================== 音频查重决策（跨用户副本复用）
+
+function loadAudioDecisions() {
+  const uid = authUser()?.id || 'anon';
+  try {
+    return JSON.parse(localStorage.getItem(`${AUDIO_DECISION_PREFIX}:${uid}`) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveAudioDecisions(map) {
+  const uid = authUser()?.id || 'anon';
+  try {
+    localStorage.setItem(`${AUDIO_DECISION_PREFIX}:${uid}`, JSON.stringify(map));
+  } catch {
+    // 存储失败时退化为每次都询问
+  }
+}
+
+/** 查云端是否已有其他用户上传的同名歌曲音频（title+artist 规范化匹配）。 */
+async function lookupCloudAudio(title, artist) {
+  const url = `${proxyBase()}/api/cloud/audio/lookup?title=${encodeURIComponent(title || '')}&artist=${encodeURIComponent(artist || '')}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${authToken()}` },
+  });
+  if (!response.ok) return null; // 查重失败不阻断上传
+  return await response.json().catch(() => null);
+}
+
+/** 弹窗询问是否复用云端副本；返回 'cloud' | 'own' | null（关闭弹窗）。 */
+function confirmReuseCloudAudio(hit) {
+  return new Promise((resolve) => {
+    const dlg = $('#dlg-audio-reuse');
+    if (!dlg || typeof dlg.showModal !== 'function') {
+      resolve('own'); // 无弹窗环境默认自己上传
+      return;
+    }
+    const titleEl = $('#audio-reuse-title');
+    const artistEl = $('#audio-reuse-artist');
+    if (titleEl) titleEl.textContent = hit.title || '未知歌曲';
+    if (artistEl) artistEl.textContent = hit.artist || '未知歌手';
+    const cloudBtn = $('#audio-reuse-cloud');
+    const ownBtn = $('#audio-reuse-own');
+    const cleanup = () => {
+      cloudBtn?.removeEventListener('click', onCloud);
+      ownBtn?.removeEventListener('click', onOwn);
+      dlg.removeEventListener('close', onClose);
+    };
+    const done = (val) => {
+      cleanup();
+      try {
+        if (dlg.open) dlg.close();
+      } catch {}
+      resolve(val);
+    };
+    const onCloud = () => done('cloud');
+    const onOwn = () => done('own');
+    const onClose = () => done(null);
+    cloudBtn?.addEventListener('click', onCloud);
+    ownBtn?.addEventListener('click', onOwn);
+    dlg.addEventListener('close', onClose);
+    dlg.showModal();
+  });
 }
 
 // =============================================================== 首次登录上传确认

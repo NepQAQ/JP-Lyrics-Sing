@@ -68,9 +68,24 @@ export function resetGraphTokenCache() {
   cachedGraphToken = null;
 }
 
-function itemPath(env, userId, songId) {
+function itemPath(env, relPath) {
   const config = sharepointConfig(env);
-  return `https://graph.microsoft.com/v1.0/sites/${config.siteId}/drives/${config.driveId}/root:/Songs/${encodeURIComponent(userId)}/${encodeURIComponent(songId)}:/content`;
+  // 逐段编码：relPath 形如 Songs/{userId}/{songId}（或共享副本路径）
+  const encoded = String(relPath).split('/').map(encodeURIComponent).join('/');
+  return `https://graph.microsoft.com/v1.0/sites/${config.siteId}/drives/${config.driveId}/root:/${encoded}:/content`;
+}
+
+/**
+ * 音频相对路径白名单校验：必须形如 Songs/{userId}/{songId}（恰好三段、段非空），
+ * 不含「..」、不以「/」开头、无控制字符——行驱动路径的硬性安全边界，
+ * 防止客户端任意 audio_path 读写文档库 Songs/ 之外的文件。
+ */
+export function isSafeAudioPath(path) {
+  if (typeof path !== 'string' || !path || path.length > 400) return false;
+  if (path.includes('..') || path.startsWith('/')) return false;
+  const segments = path.split('/');
+  if (segments.length !== 3 || segments[0] !== 'Songs') return false;
+  return segments.every((seg) => seg.length > 0 && !/[\u0000-\u001f\u007f]/.test(seg));
 }
 
 async function graphRequest(env, method, url, { body, contentType, fetchImpl = fetch } = {}) {
@@ -87,7 +102,8 @@ async function graphRequest(env, method, url, { body, contentType, fetchImpl = f
 }
 
 // 上传音频：body 为 ArrayBuffer / string（base64 已在 cloud.js 解码）或流式 Body
-export async function putAudio(env, userId, songId, body, contentType, { fetchImpl = fetch } = {}) {
+// relPath 为文档库内相对路径（Songs/{userId}/{songId}）
+export async function putAudio(env, relPath, body, contentType, { fetchImpl = fetch } = {}) {
   assertSharePointConfigured(env);
   if (!contentType) throw new ApiError(400, 'BAD_REQUEST', '缺少音频 Content-Type');
 
@@ -96,7 +112,7 @@ export async function putAudio(env, userId, songId, body, contentType, { fetchIm
     throw new ApiError(413, 'PAYLOAD_TOO_LARGE', `音频过大（${size} 字节，上限 ${MAX_AUDIO_BYTES}）`);
   }
 
-  const response = await graphRequest(env, 'PUT', itemPath(env, userId, songId), { body, contentType, fetchImpl });
+  const response = await graphRequest(env, 'PUT', itemPath(env, relPath), { body, contentType, fetchImpl });
   if (!response.ok) {
     const text = await response.text().catch(() => '');
     throw new ApiError(502, 'CLOUD_REQUEST_FAILED', `音频上传失败（${response.status}）：${text.slice(0, 300)}`);
@@ -105,9 +121,9 @@ export async function putAudio(env, userId, songId, body, contentType, { fetchIm
 }
 
 // 下载音频：返回 Response（流式透传给客户端）
-export async function getAudio(env, userId, songId, { fetchImpl = fetch } = {}) {
+export async function getAudio(env, relPath, { fetchImpl = fetch } = {}) {
   assertSharePointConfigured(env);
-  const response = await graphRequest(env, 'GET', itemPath(env, userId, songId), { fetchImpl });
+  const response = await graphRequest(env, 'GET', itemPath(env, relPath), { fetchImpl });
   if (response.status === 404) {
     throw new ApiError(404, 'AUDIO_NOT_FOUND', '云端不存在该音频文件');
   }
@@ -117,9 +133,9 @@ export async function getAudio(env, userId, songId, { fetchImpl = fetch } = {}) 
   return response;
 }
 
-export async function deleteAudio(env, userId, songId, { fetchImpl = fetch } = {}) {
+export async function deleteAudio(env, relPath, { fetchImpl = fetch } = {}) {
   assertSharePointConfigured(env);
-  const response = await graphRequest(env, 'DELETE', itemPath(env, userId, songId), { fetchImpl });
+  const response = await graphRequest(env, 'DELETE', itemPath(env, relPath), { fetchImpl });
   if (response.status === 404) return false; // 已不存在视为成功
   if (!response.ok) {
     throw new ApiError(502, 'CLOUD_REQUEST_FAILED', `音频删除失败（${response.status}）`);

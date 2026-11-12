@@ -1,354 +1,450 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark">
-
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0b0d24" />
-  <title>日语跟唱 · JP Lyrics Sing</title>
+  <title>JP Lyrics Studio · 日语跟唱</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&family=Noto+Sans+SC:wght@400;500&family=Zen+Maru+Gothic:wght@500;700&display=swap"
-    rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20261111a" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Sans+SC:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/app.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23111'/><text x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='sans-serif'>歌</text></svg>" />
 </head>
+<body data-app="lyrics" data-source="audio">
 
-<body>
-  <div class="bg-aurora" aria-hidden="true">
-    <span class="blob b1"></span>
-    <span class="blob b2"></span>
-    <span class="blob b3"></span>
+<!-- ============================== 顶栏 ============================== -->
+<header class="topbar">
+  <button id="btn-sidebar" class="icon-btn" type="button" title="曲库" aria-label="曲库">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+  </button>
+  <div class="song-head">
+    <div class="song-title-row">
+      <span id="song-title" class="song-title">JP Lyrics Studio</span>
+      <span id="song-timeline" class="tl-badge"></span>
+    </div>
+    <div id="song-artist" class="song-artist">日语歌曲练习</div>
   </div>
 
-  <header class="app-header glass">
-    <div class="brand">
-      <span class="logo">🎤</span>
-      <div class="brand-mode" id="brand-mode">
-        <button id="btn-app-mode" class="brand-mode-btn" type="button" aria-haspopup="listbox"
-          aria-expanded="false" aria-label="切换歌词与日语学习模式" title="切换歌词与日语学习模式">
-          <span class="brand-mode-text">日语跟唱</span>
-          <span class="brand-mode-arrow" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
-                stroke-linejoin="round" />
-            </svg>
-          </span>
-        </button>
-        <span class="brand-sub">JP Lyrics Sing</span>
-      </div>
-    </div>
-    <div class="header-actions">
-      <button id="btn-mode" class="mode-btn" aria-label="切换跳唱/阅读模式" title="切换跳唱/阅读模式">
-        <span class="mode-icon">🎤</span><span class="mode-text">跟唱</span>
-      </button>
-      <button id="btn-search-history" class="icon-btn" aria-label="搜索历史" title="搜索历史" aria-haspopup="dialog"
-        aria-expanded="false">
-        <span class="icon-btn-glyph" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M3 12A9 9 0 1 0 6.1 5.2" stroke="currentColor" stroke-width="1.8"
-              stroke-linecap="round" />
-            <path d="M3 4.5V9H7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-              stroke-linejoin="round" />
-            <path d="M12 7.5V12L15 14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-              stroke-linejoin="round" />
-          </svg>
-        </span>
-      </button>
-      <button id="btn-export" class="icon-btn" aria-label="导出歌词" title="导出歌词">
-        <span class="icon-btn-glyph" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 3V15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-              stroke-linejoin="round" />
-            <path d="M7 10L12 15L17 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-              stroke-linejoin="round" />
-            <path d="M5 19H19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-          </svg>
-        </span>
-      </button>
-      <button id="btn-theme" class="icon-btn" aria-label="切换主题" title="切换日间/夜间模式">
-        <span class="theme-icon">🌙</span>
-      </button>
-      <button id="btn-toggle-panel" class="icon-btn" aria-label="收起控制面板" title="收起控制面板">
-        <span class="icon-btn-glyph icon-panel-toggle" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M7 14L12 9L17 14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
-              stroke-linejoin="round" />
-          </svg>
-        </span>
-      </button>
-    </div>
-  </header>
+  <nav class="seg app-tabs" aria-label="模式">
+    <button type="button" data-app="lyrics" class="active">歌词</button>
+    <button type="button" data-app="study">学习</button>
+  </nav>
 
-  <aside class="brand-mode-menu glass" id="brand-mode-menu" role="listbox" hidden>
-    <button class="brand-mode-option active" type="button" data-mode="lyrics" role="option"
-      aria-selected="true">
-      <span class="brand-mode-opt-icon">🎵</span><span>歌词</span>
+  <div class="top-actions">
+    <button class="btn ghost hide-sm" type="button" data-cmd="search" title="联网搜索歌词（网易云 / LRCLIB）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg><span>搜索</span>
     </button>
-    <button class="brand-mode-option" type="button" data-mode="study" role="option"
-      aria-selected="false">
-      <span class="brand-mode-opt-icon">📖</span><span>日语学习</span>
+    <button class="btn ghost hide-sm" type="button" data-cmd="import" title="导入本地音频与歌词">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/></svg><span>导入</span>
     </button>
+    <span class="divider hide-sm"></span>
+    <button id="btn-view" class="btn ghost lyrics-only hide-sm" type="button">跟唱</button>
+    <button id="btn-edit-mode" class="btn ghost lyrics-only" type="button" aria-pressed="false" title="编辑模式（E）：点击单词合并 / 拆分 / 高亮">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg><span class="hide-sm">编辑</span>
+    </button>
+    <button id="btn-settings" class="icon-btn" type="button" title="显示设置" aria-label="显示设置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+    </button>
+    <button id="btn-more" class="icon-btn" type="button" title="更多" aria-label="更多">
+      <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/></svg>
+    </button>
+    <button id="btn-theme" class="icon-btn" type="button" title="切换主题" aria-label="切换主题">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>
+    </button>
+  </div>
+</header>
+
+<!-- 显示设置 -->
+<div id="settings" class="popover settings" hidden>
+  <div class="set-group">
+    <div class="set-label">视图</div>
+    <div class="seg small">
+      <label><input type="radio" name="vm" value="sing" data-set="viewMode" /><span>跟唱（高亮并居中当前句）</span></label>
+      <label><input type="radio" name="vm" value="read" data-set="viewMode" /><span>阅读</span></label>
+    </div>
+  </div>
+  <div class="set-group">
+    <div class="set-label">歌词布局</div>
+    <div class="seg small">
+      <label><input type="radio" name="layout" value="stack" data-set="layout" /><span>分行</span></label>
+      <label><input type="radio" name="layout" value="inline" data-set="layout" /><span>逐词对照</span></label>
+    </div>
+  </div>
+  <div class="set-group">
+    <div class="set-label">单词样式 <span class="muted small">自动把句子拆成单词</span></div>
+    <div class="seg small">
+      <label><input type="radio" name="ws" value="none" data-set="wordStyle" /><span>无</span></label>
+      <label><input type="radio" name="ws" value="box" data-set="wordStyle" /><span>边框</span></label>
+      <label><input type="radio" name="ws" value="tint" data-set="wordStyle" /><span>底色</span></label>
+      <label><input type="radio" name="ws" value="underline" data-set="wordStyle" /><span>下划线</span></label>
+    </div>
+    <label class="chk"><input type="checkbox" data-set="wordStyleLongOnly" /> 仅对长句启用（≥ <input type="number" class="num" min="4" max="60" data-set="longLineChars" /> 字）</label>
+  </div>
+  <div class="set-group">
+    <div class="set-label">显示</div>
+    <div class="chips">
+      <label class="chk"><input type="checkbox" data-set="showFurigana" /> 假名注音</label>
+      <label class="chk"><input type="checkbox" data-set="showRomaji" /> 罗马音</label>
+      <label class="chk"><input type="checkbox" data-set="showZh" /> 中文</label>
+    </div>
+    <div class="seg small">
+      <label><input type="radio" name="script" value="hiragana" data-set="kanaScript" /><span>注音：平假名</span></label>
+      <label><input type="radio" name="script" value="katakana" data-set="kanaScript" /><span>片假名</span></label>
+    </div>
+  </div>
+  <div class="set-group">
+    <div class="set-label">字号</div>
+    <input type="range" min="0.8" max="1.6" step="0.05" data-set="fontScale" />
+  </div>
+  <div class="set-group">
+    <div class="set-label">同步与单句播放</div>
+    <label class="chk" title="打开没有逐字时间轴的歌曲时，自动从网易云 yrc / PetitLyrics 获取逐字时间"><input type="checkbox" data-set="autoWordTiming" /> 自动获取逐字时间轴</label>
+    <label class="chk" title="没有逐字时间轴时，按假名音拍数估算这一句实际唱完的时间，而不是一直算到下一句开始"><input type="checkbox" data-set="estimateSungEnd" /> 按音拍估算句尾</label>
+    <label class="chk">单句提前开始 <input type="number" class="num" min="0" max="1.5" step="0.05" data-set="segLead" /> 秒</label>
+    <label class="chk">在下一句前提前结束 <input type="number" class="num" min="0" max="1.5" step="0.05" data-set="segTrim" /> 秒</label>
+  </div>
+  <div class="set-group">
+    <div class="set-label">播放与编辑</div>
+    <label class="chk"><input type="checkbox" data-set="preservePitch" /> 变速时保持音高</label>
+    <label class="chk"><input type="checkbox" data-set="applySameLines" /> 编辑时同步到本曲相同歌词（副歌）</label>
+  </div>
+</div>
+
+<!-- 更多菜单 -->
+<div id="more-menu" class="popover menu" hidden>
+  <button type="button" data-cmd="search" class="show-sm">联网搜索歌词</button>
+  <button type="button" data-cmd="import" class="show-sm">导入本地歌曲</button>
+  <button type="button" data-app="study" class="show-sm">切换到「学习」模式</button>
+  <button type="button" data-app="lyrics" class="show-sm">切换到「歌词」模式</button>
+  <div class="menu-sep show-sm"></div>
+  <button type="button" data-cmd="info">歌曲信息 / 更换音频</button>
+  <button type="button" data-cmd="fulltext">全文编辑歌词（LRC）</button>
+  <button type="button" data-cmd="history">修改历史（可撤销）</button>
+  <button type="button" data-cmd="dictionary">我的词典</button>
+  <div class="menu-sep"></div>
+  <button type="button" data-cmd="wordtiming">获取逐字时间轴（网易云 / PetitLyrics）</button>
+  <button type="button" data-cmd="clear-wordtiming">清除逐字时间轴</button>
+  <button type="button" data-cmd="tapsync">打轴（给纯文本歌词打时间）</button>
+  <button type="button" data-cmd="marumaru">Marumaru 补充注音 / 中文</button>
+  <button type="button" data-cmd="translate">机器翻译补全中文</button>
+  <button type="button" data-cmd="reanalyze">重新分析未编辑的行</button>
+  <div class="menu-sep"></div>
+  <button type="button" data-cmd="export">导出（TXT / LRC）</button>
+</div>
+
+<!-- ============================== 主体 ============================== -->
+<div class="layout">
+  <aside class="sidebar" aria-label="曲库">
+    <div class="sidebar-head">
+      <div class="sidebar-title">曲库 <span id="lib-count" class="muted small">0</span></div>
+      <button class="btn small primary" type="button" data-cmd="import">＋ 导入</button>
+    </div>
+    <input id="lib-filter" class="input" type="search" placeholder="筛选歌名 / 歌手" />
+    <div id="lib-list" class="lib-list"></div>
+    <div class="sidebar-foot">
+      <button class="btn small ghost block" type="button" data-cmd="search">🔍 联网搜索歌词</button>
+    </div>
   </aside>
+  <div id="sidebar-scrim" class="scrim"></div>
 
-  <aside id="search-history-popover" class="overrides-popover history-popover glass" role="dialog"
-    aria-labelledby="search-history-title" hidden>
-    <div class="popover-head">
-      <div>
-        <div id="search-history-title" class="popover-title">搜索历史</div>
-        <div class="popover-subtitle">本地缓存</div>
-      </div>
-      <button id="btn-close-search-history" class="icon-btn popover-close" aria-label="关闭搜索历史" title="关闭">×</button>
-    </div>
-    <div id="search-history-list" class="history-list"></div>
-  </aside>
+  <main class="main">
+    <section id="lyrics" class="lyrics" tabindex="0" aria-label="歌词"></section>
 
-  <aside id="export-popover" class="overrides-popover glass" hidden>
-    <div class="popover-head">
-      <div>
-        <div class="popover-title">导出歌词</div>
-        <div class="popover-subtitle">选择要导出的内容</div>
-      </div>
-      <button id="btn-close-export" class="icon-btn popover-close" aria-label="关闭导出" title="关闭">×</button>
-    </div>
-    <div class="export-checkboxes">
-      <label class="chip"><input type="checkbox" id="export-jp" checked /><span>日语</span></label>
-      <label class="chip"><input type="checkbox" id="export-romaji" checked /><span>罗马音</span></label>
-      <label class="chip"><input type="checkbox" id="export-zh" /><span>中文</span></label>
-    </div>
-    <textarea id="export-output" rows="10" readonly placeholder="点击下方按钮生成..."></textarea>
-    <div class="row">
-      <button id="btn-generate-export" class="primary">生成</button>
-      <button id="btn-copy-export">复制到剪贴板</button>
-      <button id="btn-save-export">保存为 TXT</button>
-    </div>
-  </aside>
-
-  <section id="panel" class="panel glass">
-    <form class="row search-row" id="search-form" role="search" autocomplete="off">
-      <div class="search-box">
-        <span class="search-icon">🔍</span>
-        <input
-          id="search-input"
-          type="search"
-          placeholder="搜索歌曲（如：夜に駆ける YOASOBI）"
-          enterkeyhint="search"
-          autocomplete="off"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck="false"
-        />
-      </div>
-      <button id="btn-search" class="primary" type="submit">搜索歌词</button>
-    </form>
-    <div id="search-results" class="search-results" hidden></div>
-    <div id="assist-actions" class="assist-actions glass" hidden>
-      <div class="assist-actions-head">
-        <div class="assist-actions-title">补充来源</div>
-        <div id="assist-actions-meta" class="assist-actions-meta">选择歌词后，将自动搜索 Marumaru。</div>
-      </div>
-      <div class="assist-actions-buttons">
-        <button id="btn-apply-marumaru" class="assist-btn" type="button" disabled>Marumaru 待命</button>
-      </div>
-    </div>
-
-    <div class="section-label">音频来源</div>
-    <div class="source-tabs" role="tablist">
-      <button class="tab active" data-tab="timer" role="tab">⏱ 计时</button>
-      <button class="tab" data-tab="local" role="tab">📁 本地</button>
-    </div>
-
-    <div class="tab-pane active" data-pane="timer">
-      <p class="hint-sm" style="margin-bottom:8px">用于无法读取播放进度的场景（如外部播放器、唱 K）。在歌曲第 0 秒按 ▶ 开始即可。</p>
-      <div class="row">
-        <button id="btn-timer-start" class="primary">▶ 开始 / 暂停</button>
-        <button id="btn-timer-reset">⟲ 归零</button>
-        <button id="btn-timer-restart">⟳ 从头开始</button>
-        <button id="btn-timer-back">« -0.5s</button>
-        <button id="btn-timer-fwd">+0.5s »</button>
-      </div>
-    </div>
-
-    <div class="tab-pane" data-pane="local">
-      <div class="sub-tabs" role="tablist">
-        <button class="sub-tab active" data-subtab="audio" role="tab">🎵 音频</button>
-        <button class="sub-tab" data-subtab="lrc" role="tab">📝 LRC 歌词</button>
-      </div>
-
-      <div class="sub-pane active" data-subpane="audio">
-        <label class="file-label block">
-          <span class="file-cta">选择音频文件</span>
-          <span id="audio-file-name" class="file-name">未选择文件（ncm / mp3 / m4a / flac / wav…）</span>
-          <input id="audio-file" type="file" hidden />
-        </label>
-        <p class="hint-sm">NCM 在本机还原原始音频格式，不上传文件；需要浏览器支持该格式。</p>
-      </div>
-
-      <div class="sub-pane" data-subpane="lrc">
-        <label class="file-label block">
-          <span class="file-cta">上传 LRC 文件</span>
-          <span id="lrc-file-name" class="file-name">未选择 .lrc 文件</span>
-          <input id="lrc-file" type="file" accept=".lrc,.txt" hidden />
-        </label>
-        <textarea id="lrc-text" rows="5" placeholder="或在此粘贴 LRC 歌词文本（含 [mm:ss.xx] 时间标签）"></textarea>
-        <div class="row">
-          <button id="btn-load-lrc" class="primary">加载歌词</button>
-          <button id="btn-clear">清空</button>
+    <section id="study" class="study" aria-label="日语学习">
+      <div class="study-panel">
+        <textarea id="study-input" rows="4" lang="ja" placeholder="输入日语句子，自动分词并标注假名与罗马音（Ctrl+Enter 转换）&#10;例：風に触った中で、君の声が聞こえた。"></textarea>
+        <div class="study-actions">
+          <button id="study-convert" class="btn primary" type="button">转换</button>
+          <button id="study-speak" class="btn" type="button">朗读全部</button>
+          <button id="study-clear" class="btn ghost" type="button">清空</button>
+          <select id="study-voice" class="input select" aria-label="朗读音色"></select>
         </div>
+        <div id="study-status" class="status-line"></div>
       </div>
-    </div>
-
-    <div class="section-label">显示设置</div>
-    <div class="row toggles">
-      <label class="chip"><input type="checkbox" id="show-furigana" checked /><span>假名</span></label>
-      <label class="chip"><input type="checkbox" id="show-romaji" checked /><span>罗马音</span></label>
-      <label class="chip"><input type="checkbox" id="show-zh" checked /><span>中文</span></label>
-      <label class="chip"><input type="checkbox" id="auto-translate" /><span>自动翻译</span></label>
-      <label class="chip markup-mode-chip" title="开启后可拖选罗马音添加标记">
-        <input type="checkbox" id="enable-romaji-markup" /><span>标记罗马音</span>
-      </label>
-      <label class="song-practice-toggle">
-        <input type="checkbox" id="enable-song-practice" aria-controls="song-practice" />
-        <span>歌曲逐句练习</span>
-      </label>
-    </div>
-
-    <div id="status" class="status"></div>
-  </section>
-
-  <section id="study-view" class="study-view" hidden>
-    <div class="study-panel glass">
-      <div class="study-head">
-        <div>
-          <div class="study-title">日语学习</div>
-          <div class="study-subtitle">输入日语句子，生成假名与罗马音</div>
-        </div>
-        <button id="btn-study-speak-all" class="primary" type="button">朗读全部</button>
-      </div>
-      <textarea id="study-input" rows="5" placeholder="例：今日はいい天気ですね。&#10;一緒に日本語を練習しましょう。"></textarea>
-      <label class="study-voice-row">
-        <span>朗读音色</span>
-        <select id="study-voice-select" class="study-voice-select">
-          <option value="cn-default">中国区优先（百度/有道，失败后自动兜底）</option>
-          <option value="voicevox-13">低沉男声（VOICEVOX 青山龍星）</option>
-          <option value="voicevox-11">男声（VOICEVOX 玄野武宏）</option>
-          <option value="voicevox-8">清亮女声（VOICEVOX 春日部つむぎ）</option>
-          <option value="voicevox-2">女声（VOICEVOX 四国めたん）</option>
-          <option value="voicevox-3">可爱声线（VOICEVOX ずんだもん）</option>
-          <option value="browser-ja">系统日语语音（ja-JP）</option>
-        </select>
-      </label>
-      <div class="row study-actions">
-        <button id="btn-study-convert" class="primary" type="button">转换</button>
-        <button id="btn-study-clear" type="button">清空</button>
-      </div>
-      <div id="study-status" class="status"></div>
-    </div>
-    <div id="study-results" class="study-results">
-      <div class="hint-card">
-        <div class="hint-emoji">📖</div>
-        <p><strong>日语学习模式</strong></p>
-        <p>输入句子后点击转换，会按阅读模式样式显示假名与罗马音。</p>
-        <p class="hint-sub">朗读可选择不同音色，默认优先尝试中国区可访问的免费语音接口。</p>
-      </div>
-    </div>
-  </section>
-
-  <section id="song-practice" class="song-practice glass" aria-label="歌曲逐句练习" hidden>
-    <div class="row">
-      <label><input id="song-practice-loop" type="checkbox" /> 循环当前句</label>
-      <label>倍速
-        <select id="song-practice-rate">
-          <option value="0.5">0.5×</option>
-          <option value="0.75">0.75×</option>
-          <option value="1" selected>1×</option>
-          <option value="1.25">1.25×</option>
-          <option value="1.5">1.5×</option>
-        </select>
-      </label>
-      <label>偏移（秒）
-        <input id="song-practice-offset" type="number" step="0.1" value="0"
-          aria-describedby="song-practice-help" />
-      </label>
-      <button id="song-practice-stop" type="button" disabled>停止练习</button>
-      <button id="song-practice-hide" type="button">隐藏练习</button>
-    </div>
-    <p id="song-practice-help" class="hint-sm">正偏移：歌词片段在音频中延后播放；负偏移：提前播放。换音频或歌词后归零。</p>
-    <p id="song-practice-status" class="hint-sm" role="status" aria-live="polite"></p>
-  </section>
-
-  <main id="lyrics-view" class="lyrics-view" tabindex="0">
-    <div class="hint-card">
-      <div class="hint-emoji">🎵</div>
-      <p><strong>欢迎！</strong></p>
-      <p>顶部搜索歌词 · 选择音频来源（本地文件 / 计时）· 点播放即可跟唱</p>
-      <p class="hint-sub">右上角 🎤 切换 <b>跟唱模式</b>（高亮当前句）与 <b>阅读模式</b>（清晰平铺全文）。</p>
-    </div>
+      <div id="study-results" class="study-results"></div>
+    </section>
   </main>
+</div>
 
-  <aside id="romaji-annotation-popover" class="annotation-popover glass" role="dialog"
-    aria-label="添加罗马音标记" hidden>
-    <div class="annotation-head">
-      <div>
-        <div class="popover-title">添加标记</div>
-        <div id="annotation-selection" class="annotation-selection"></div>
-      </div>
-      <button id="btn-close-annotation" class="icon-btn popover-close" type="button" aria-label="关闭标记工具"
-        title="关闭">×</button>
-    </div>
-    <div class="tone-types" role="radiogroup" aria-label="中文声调">
-      <button class="annotation-type tone-type" type="button" data-annotation-type="tone1" aria-pressed="false">
-        <span class="tone-number">1</span><span>一声</span><span class="tone-glyph">ˉ</span>
-      </button>
-      <button class="annotation-type tone-type" type="button" data-annotation-type="tone2" aria-pressed="false">
-        <span class="tone-number">2</span><span>二声</span><span class="tone-glyph">ˊ</span>
-      </button>
-      <button class="annotation-type tone-type" type="button" data-annotation-type="tone3" aria-pressed="false">
-        <span class="tone-number">3</span><span>三声</span><span class="tone-glyph">ˇ</span>
-      </button>
-      <button class="annotation-type tone-type" type="button" data-annotation-type="tone4" aria-pressed="false">
-        <span class="tone-number">4</span><span>四声</span><span class="tone-glyph">ˋ</span>
-      </button>
-    </div>
-    <div class="annotation-types" role="radiogroup" aria-label="其他标记">
-      <button class="annotation-type active" type="button" data-annotation-type="phrase" aria-pressed="true">
-        <span class="annotation-sample sample-phrase" aria-hidden="true">ab</span><span>连读</span>
-      </button>
-      <button class="annotation-type" type="button" data-annotation-type="break" aria-pressed="false">
-        <span class="annotation-sample sample-break" aria-hidden="true">a/b</span><span>中断</span>
-      </button>
-      <button class="annotation-type" type="button" data-annotation-type="note" aria-pressed="false">
-        <span class="annotation-sample sample-note" aria-hidden="true">ab</span><span>备注</span>
-      </button>
-    </div>
-    <input id="annotation-note" type="text" maxlength="18" placeholder="备注文字（选择“备注”时填写）" />
-    <div class="row annotation-actions">
-      <button id="btn-apply-annotation" class="primary" type="button">应用</button>
-      <button id="btn-remove-annotation" type="button">清除所选标记</button>
-    </div>
-    <div class="row annotation-actions annotation-actions-wide">
-      <button id="btn-clear-all-annotations" class="btn-danger" type="button">清除本曲所有标记</button>
-    </div>
-  </aside>
-
-  <div id="timer-hud" class="timer-hud" hidden>
-    <span class="hud-dot"></span>
-    <span id="timer-display">00:00.0</span>
-    <button id="hud-toggle" class="hud-btn" title="开始/暂停">▶</button>
-    <button id="hud-restart" class="hud-btn" title="从头开始">⟳</button>
-    <button id="hud-back" class="hud-btn" title="-0.5s">«</button>
-    <button id="hud-fwd" class="hud-btn" title="+0.5s">»</button>
+<!-- 打轴条 -->
+<div id="tapbar" class="tapbar" hidden>
+  <div class="tap-info">
+    <span class="tag">打轴</span>
+    <span id="tap-progress" class="muted">0/0</span>
+    <span class="tap-next-label">下一句：</span><span id="tap-next" class="tap-next" lang="ja"></span>
   </div>
+  <div class="tap-actions">
+    <button id="btn-tap-play" class="btn" type="button">播放 / 暂停</button>
+    <button id="btn-tap" class="btn primary" type="button" title="快捷键 T / Enter">打点 (T)</button>
+    <button id="btn-untap" class="btn" type="button" title="快捷键 Backspace">撤销</button>
+    <button id="btn-tap-done" class="btn" type="button">完成并保存</button>
+    <button id="btn-tap-cancel" class="btn ghost" type="button">取消</button>
+  </div>
+</div>
 
-  <footer class="player-bar glass" id="player-bar">
-    <audio id="audio" preload="metadata" controls playsinline></audio>
-  </footer>
+<!-- ============================== 播放条 ============================== -->
+<footer class="player">
+  <div class="player-main">
+    <button id="btn-prev" class="icon-btn" type="button" title="上一句（←）" aria-label="上一句">
+      <svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM19 5v14L9 12z" fill="currentColor"/></svg>
+    </button>
+    <button id="btn-play" class="play-btn" type="button" aria-label="播放"></button>
+    <button id="btn-next" class="icon-btn" type="button" title="下一句（→）" aria-label="下一句">
+      <svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM5 5v14l10-7z" fill="currentColor"/></svg>
+    </button>
+    <button id="btn-back5" class="icon-btn hide-sm" type="button" title="后退 3 秒" aria-label="后退 3 秒">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/></svg>
+    </button>
+    <button id="btn-loop" class="icon-btn" type="button" title="单句循环（R）" aria-label="单句循环">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l3 3-3 3"/><path d="M4 11V9a3 3 0 0 1 3-3h13"/><path d="M7 21l-3-3 3-3"/><path d="M20 13v2a3 3 0 0 1-3 3H4"/></svg>
+    </button>
+  </div>
+  <div class="player-seek">
+    <span id="time-cur" class="time">00:00.0</span>
+    <input id="seek" type="range" min="0" max="1000" step="1" value="0" aria-label="进度" />
+    <span id="time-dur" class="time">--:--</span>
+  </div>
+  <div class="player-side">
+    <label class="rate" title="全局播放速度（[ / ] 调节）">
+      <span class="muted small">速度</span>
+      <span id="rate-label" class="rate-label">1×</span>
+      <select id="rate-select" aria-label="播放速度"></select>
+    </label>
+    <div class="seg tiny source" title="音源：本地音频 / 计时器（配合外部播放器）">
+      <button type="button" data-source="audio" class="active">音频</button>
+      <button type="button" data-source="timer">计时</button>
+    </div>
+    <div class="offset" title="歌词偏移（秒）：正数 = 歌词整体延后。播放时在某句刚开始唱的瞬间点「对齐」（A）可自动校准">
+      <span class="muted small hide-sm">偏移</span>
+      <button id="btn-offset-minus" class="icon-btn tiny" type="button" aria-label="歌词提前 0.1 秒" title="歌词提前 0.1 秒">−</button>
+      <input id="offset-input" type="number" step="0.05" value="0" aria-label="歌词偏移（秒）" />
+      <button id="btn-offset-plus" class="icon-btn tiny" type="button" aria-label="歌词延后 0.1 秒" title="歌词延后 0.1 秒">+</button>
+      <button id="btn-offset-align" class="btn small" type="button" title="播放时，在听到某一句刚开始唱的瞬间点击（快捷键 A）">对齐</button>
+    </div>
+  </div>
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+  <audio id="audio" preload="auto" playsinline></audio>
+</footer>
 
-  <!-- Libraries (local, 避免 unpkg 等外部 CDN 在国内无法访问) -->
-  <script src="lib/kuromoji.js"></script>
-  <script src="lib/kuroshiro.min.js"></script>
-  <script src="lib/kuroshiro-analyzer-kuromoji.min.js"></script>
-  <script src="app.js?v=20261111b"></script>
+<!-- 单词浮动工具条（编辑模式） -->
+<div id="word-toolbar" class="word-toolbar" hidden>
+  <div class="wt-row">
+    <span id="wt-info" class="wt-info" lang="ja"></span>
+    <button id="wt-close" class="icon-btn tiny" type="button" aria-label="关闭">×</button>
+  </div>
+  <div class="wt-row">
+    <button id="wt-merge" class="btn small" type="button" title="把选中的多个词合并成一个">合并</button>
+    <button id="wt-split" class="btn small" type="button" title="在字之间切开">拆分…</button>
+    <span class="wt-sep"></span>
+    <button class="sw hl-y" type="button" data-hl="y" title="黄色高亮"></button>
+    <button class="sw hl-g" type="button" data-hl="g" title="绿色高亮"></button>
+    <button class="sw hl-b" type="button" data-hl="b" title="蓝色高亮"></button>
+    <button class="sw hl-p" type="button" data-hl="p" title="粉色高亮"></button>
+    <button class="sw hl-o" type="button" data-hl="o" title="橙色高亮"></button>
+    <button id="wt-box" class="btn small" type="button" title="给这个词加边框">框</button>
+    <button id="wt-clear" class="btn small ghost" type="button" title="清除标记">清除</button>
+  </div>
+  <div class="wt-row">
+    <button id="wt-link" class="btn small" type="button" title="与下一个词连读（罗马音用 ‿ 连接）">连读</button>
+    <button id="wt-brk" class="btn small" type="button" title="在这个词后停顿 / 换气">停顿</button>
+    <button id="wt-note" class="btn small" type="button" title="给词添加备注">备注</button>
+    <span class="wt-tones" title="声调标记（给中文母语者的发音提示）">
+      <button type="button" data-tone="1">ˉ</button><button type="button" data-tone="2">ˊ</button><button type="button" data-tone="3">ˇ</button><button type="button" data-tone="4">ˋ</button>
+    </span>
+    <button id="wt-edit" class="btn small" type="button" title="编辑读音 / 罗马音 / 整行">✎ 读音…</button>
+  </div>
+  <div id="wt-note-row" class="wt-row" hidden>
+    <input id="wt-note-input" class="input" maxlength="24" placeholder="备注（回车保存，留空删除）" />
+    <button id="wt-note-save" class="btn small primary" type="button">保存</button>
+  </div>
+</div>
+
+<!-- ============================== 对话框 ============================== -->
+<dialog id="dlg-line" class="dlg wide" aria-labelledby="le-title">
+  <div class="dlg-head"><h3 id="le-title">编辑</h3><button class="icon-btn" type="button" onclick="this.closest('dialog').close()" aria-label="关闭">×</button></div>
+  <div class="dlg-body">
+    <div class="form-row">
+      <label class="field time-field"><span>时间</span><input id="le-time" class="input mono" /></label>
+      <button id="le-now" class="btn small" type="button" title="把当前播放位置设为这一行的开始时间">取当前时间</button>
+      <button id="le-preview" class="btn small" type="button">试听这一句</button>
+    </div>
+    <label class="field"><span>原文（日语）</span><input id="le-text" class="input jp-input" lang="ja" /></label>
+    <div id="le-stale" class="notice" hidden>原文已修改：保存时会自动重新分词，或 <button id="le-reanalyze" type="button" class="link">立即重新分析</button></div>
+
+    <div id="le-seg" class="seg-editor">
+      <div class="field-label">分词 <span class="muted small">点击字与字之间的竖线：<b>实线</b> = 词的分界（点击合并），<b>虚线</b> = 词内部（点击切开）</span></div>
+      <div id="le-chars" class="seg-chars" lang="ja"></div>
+      <div class="word-table-head">
+        <span>词</span><span>读音（平假 / 片假均可）</span><span>罗马音</span><span>高亮</span><span></span><span>声调</span><span>备注</span>
+      </div>
+      <div id="le-words" class="word-table"></div>
+      <div class="row-actions">
+        <button id="le-hira" class="btn small ghost" type="button">读音全部转平假名</button>
+        <button id="le-kata" class="btn small ghost" type="button">读音全部转片假名</button>
+        <button id="le-recalc" class="btn small ghost" type="button">按读音重算罗马音</button>
+        <button class="btn small ghost" type="button" onclick="document.getElementById('le-reanalyze').click()">重新自动分词</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">整行罗马音 <label class="chk small"><input id="le-romaji-manual" type="checkbox" /> 手动覆盖（不勾选则由上面每个词的罗马音自动拼接）</label></div>
+      <textarea id="le-romaji" class="input" rows="2"></textarea>
+    </div>
+    <label class="field"><span>中文</span><textarea id="le-zh" class="input" rows="2" lang="zh-CN"></textarea></label>
+    <div class="chips">
+      <label class="chk"><input id="le-same" type="checkbox" /> 同步到本曲相同歌词<span id="le-same-count" class="muted small"></span></label>
+      <label class="chk" title="自动分词时把这些词当作整体并使用你的读音，对所有歌曲生效"><input id="le-dict" type="checkbox" /> 把修改过的词加入我的词典</label>
+    </div>
+  </div>
+  <div class="dlg-foot">
+    <span class="muted small">Ctrl+Enter 保存 · 所有修改都会记入「修改历史」</span>
+    <button id="le-cancel" class="btn ghost" type="button">取消</button>
+    <button id="le-save" class="btn primary" type="button">保存</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-import" class="dlg" aria-labelledby="imp-h">
+  <div class="dlg-head"><h3 id="imp-h">导入本地歌曲</h3><button class="icon-btn" type="button" onclick="this.closest('dialog').close()" aria-label="关闭">×</button></div>
+  <div class="dlg-body">
+    <div id="imp-drop" class="dropzone">
+      <div class="file-row">
+        <label class="btn primary"><input id="imp-files" type="file" multiple accept="audio/*,.ncm,.flac,.m4a,.ape,.lrc,.txt" hidden />选择文件</label>
+        <span class="muted small">歌曲和歌词可以<b>一起选</b>，也可以直接拖到这里；会自动识别哪个是歌曲、哪个是歌词。多首歌一起选时按文件名自动配对。</span>
+      </div>
+      <div id="imp-filelist" class="imp-filelist"></div>
+      <div id="imp-summary" class="imp-summary small"></div>
+      <div class="muted small">支持 mp3 / m4a / flac / ogg / wav / ncm 与 .lrc / .txt。NCM 在本机浏览器里还原；文件保存在本机浏览器（IndexedDB），下次打开无需重复上传。</div>
+    </div>
+    <div id="imp-single" class="imp-single">
+      <div class="form-grid">
+        <label class="field"><span>歌名</span><input id="imp-title" class="input" /></label>
+        <label class="field"><span>歌手</span><input id="imp-artist" class="input" /></label>
+      </div>
+      <label class="field"><span>歌词（自动填入所选歌词文件，也可直接粘贴 LRC / 纯文本，可留空）</span><textarea id="imp-lrc" class="input mono" rows="6" lang="ja" placeholder="[00:12.30]風に触った中で..."></textarea></label>
+    </div>
+    <label class="chk"><input id="imp-autosearch" type="checkbox" checked /> 没有歌词时，导入后自动联网搜索并绑定</label>
+    <div id="imp-progress" class="progress" hidden><div id="imp-progress-bar"></div></div>
+  </div>
+  <div class="dlg-foot">
+    <button id="imp-cancel" class="btn ghost" type="button">取消</button>
+    <button id="imp-submit" class="btn primary" type="button">导入</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-search" class="dlg wide" aria-labelledby="sr-h">
+  <div class="dlg-head"><h3 id="sr-h">联网搜索歌词</h3><button id="sr-close" class="icon-btn" type="button" aria-label="关闭">×</button></div>
+  <div class="dlg-body">
+    <form id="sr-form" class="search-form" autocomplete="off">
+      <input id="sr-q" class="input" type="search" placeholder="歌名 歌手（如：夜に駆ける YOASOBI）" />
+      <button class="btn primary" type="submit">搜索</button>
+    </form>
+    <label id="sr-bind-row" class="chk bind-row" hidden><input id="sr-bind" type="checkbox" /> 绑定到当前歌曲 <b id="sr-bind-name"></b>（保留已上传的音频；不勾选则作为新歌曲加入曲库）</label>
+    <div class="sr-tabs">
+      <button type="button" class="sr-tab" data-src="netease"><span class="dot" data-state="idle"></span>网易云</button>
+      <button type="button" class="sr-tab" data-src="lrclib"><span class="dot" data-state="idle"></span>LRCLIB</button>
+      <button type="button" class="sr-tab" data-src="library"><span class="dot" data-state="idle"></span>曲库</button>
+    </div>
+    <div class="sr-pane" data-pane="netease"><div id="sr-netease" class="sr-list"></div></div>
+    <div class="sr-pane" data-pane="lrclib" hidden><div id="sr-lrclib" class="sr-list"></div></div>
+    <div class="sr-pane" data-pane="library" hidden><div id="sr-library" class="sr-list"></div></div>
+  </div>
+</dialog>
+
+<dialog id="dlg-marumaru" class="dlg" aria-labelledby="mm-h">
+  <div class="dlg-head"><h3 id="mm-h">Marumaru 注音 / 中文</h3><button id="mm-close" class="icon-btn" type="button" aria-label="关闭">×</button></div>
+  <div class="dlg-body">
+    <p class="muted small">选择一个候选，把它的假名注音与中文翻译套到当前歌曲（按原文匹配，手动编辑过的行不受影响）。</p>
+    <div id="mm-list" class="sr-list"></div>
+  </div>
+</dialog>
+
+<dialog id="dlg-fulltext" class="dlg wide" aria-labelledby="ft-h">
+  <div class="dlg-head"><h3 id="ft-h">全文编辑歌词</h3><button class="icon-btn" type="button" onclick="this.closest('dialog').close()" aria-label="关闭">×</button></div>
+  <div class="dlg-body">
+    <div class="form-row">
+      <label class="btn small"><input id="ft-file" type="file" accept=".lrc,.txt" hidden />从文件载入</label>
+      <span class="muted small">每行 <code>[分:秒.百分秒]歌词</code>；没有时间标签则按纯文本处理（可再「打轴」）。同一时间戳的第二行（非日语）会作为中文翻译。</span>
+    </div>
+    <textarea id="ft-text" class="input mono" rows="18" lang="ja" spellcheck="false"></textarea>
+    <label class="chk"><input id="ft-keep" type="checkbox" checked /> 原文未改动的行保留分词 / 读音 / 标记 / 中文</label>
+  </div>
+  <div class="dlg-foot">
+    <span class="muted small">保存前会自动快照，可在「修改历史」整体撤销</span>
+    <button id="ft-cancel" class="btn ghost" type="button">取消</button>
+    <button id="ft-save" class="btn primary" type="button">保存</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-history" class="dlg wide" aria-labelledby="hist-h">
+  <div class="dlg-head"><h3 id="hist-h">修改历史</h3><button id="hist-close" class="icon-btn" type="button" aria-label="关闭">×</button></div>
+  <div class="dlg-body"><div id="hist-list" class="hist-list"></div></div>
+</dialog>
+
+<dialog id="dlg-dict" class="dlg wide" aria-labelledby="dict-h">
+  <div class="dlg-head"><h3 id="dict-h">我的词典</h3><button id="dict-close" class="icon-btn" type="button" aria-label="关闭">×</button></div>
+  <div class="dlg-body">
+    <p class="muted small">词典里的词在自动分词时会被当作一个整体，并使用你设定的读音 / 罗马音（对所有歌曲生效）。</p>
+    <div class="form-row dict-form">
+      <input id="dict-t" class="input" placeholder="词面，如 風に触った" lang="ja" />
+      <input id="dict-k" class="input" placeholder="读音，如 かぜにさわった" lang="ja" />
+      <input id="dict-r" class="input" placeholder="罗马音（可留空自动生成）" />
+      <button id="dict-add" class="btn primary small" type="button">添加</button>
+    </div>
+    <div id="dict-list" class="dict-list"></div>
+  </div>
+  <div class="dlg-foot">
+    <button id="dict-reanalyze" class="btn" type="button">按词典重新分析本曲未编辑的行</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-info" class="dlg" aria-labelledby="si-h">
+  <div class="dlg-head"><h3 id="si-h">歌曲信息</h3><button class="icon-btn" type="button" onclick="this.closest('dialog').close()" aria-label="关闭">×</button></div>
+  <div class="dlg-body">
+    <div class="form-grid">
+      <label class="field"><span>歌名</span><input id="si-title" class="input" /></label>
+      <label class="field"><span>歌手</span><input id="si-artist" class="input" /></label>
+    </div>
+    <label class="field"><span>专辑</span><input id="si-album" class="input" /></label>
+    <div class="field">
+      <div class="field-label">音频</div>
+      <div class="form-row">
+        <span id="si-audio" class="muted small"></span>
+        <label class="btn small"><input id="si-audio-file" type="file" accept="audio/*,.ncm,.flac,.m4a" hidden />上传 / 更换音频</label>
+        <button id="si-remove-audio" class="btn small ghost" type="button">删除音频</button>
+      </div>
+    </div>
+  </div>
+  <div class="dlg-foot">
+    <button id="si-delete" class="btn danger ghost" type="button">从曲库删除</button>
+    <span class="grow"></span>
+    <button id="si-cancel" class="btn ghost" type="button">取消</button>
+    <button id="si-save" class="btn primary" type="button">保存</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-export" class="dlg wide" aria-labelledby="ex-h">
+  <div class="dlg-head"><h3 id="ex-h">导出</h3><button id="ex-close" class="icon-btn" type="button" aria-label="关闭">×</button></div>
+  <div class="dlg-body">
+    <div class="chips">
+      <label class="chk"><input id="ex-jp" type="checkbox" checked /> 日语原文</label>
+      <label class="chk"><input id="ex-seg" type="checkbox" /> 分词（| 分隔）</label>
+      <label class="chk"><input id="ex-kana" type="checkbox" /> 假名</label>
+      <label class="chk"><input id="ex-ro" type="checkbox" checked /> 罗马音</label>
+      <label class="chk"><input id="ex-zh" type="checkbox" /> 中文</label>
+    </div>
+    <textarea id="ex-out" class="input mono" rows="14" readonly></textarea>
+  </div>
+  <div class="dlg-foot">
+    <button id="ex-copy" class="btn" type="button">复制</button>
+    <button id="ex-txt" class="btn" type="button">下载 TXT</button>
+    <button id="ex-lrc" class="btn" type="button">下载 LRC</button>
+    <button id="ex-lrc-zh" class="btn" type="button">LRC（含中文）</button>
+  </div>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="lib/kuromoji.js"></script>
+<script type="module" src="js/main.js"></script>
 </body>
-
 </html>

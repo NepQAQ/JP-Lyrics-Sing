@@ -7,6 +7,31 @@ const CORE_KEY = Uint8Array.from([
 ]);
 const MAGIC = 'CTENFDAM';
 const KEY_PREFIX = 'neteasecloudmusic';
+// 元数据（歌名/歌手）解密密钥：用于导入 NCM 时自动填写标题，失败不影响音频还原
+const META_KEY = Uint8Array.from([
+  0x23, 0x31, 0x34, 0x6c, 0x6a, 0x6b, 0x5f, 0x21,
+  0x5c, 0x5d, 0x26, 0x30, 0x55, 0x3c, 0x27, 0x28,
+]);
+
+function decodeMeta(raw) {
+  try {
+    const bytes = raw.map(b => b ^ 0x63);
+    const b64 = new TextDecoder().decode(bytes.subarray(22)); // 去掉 "163 key(Don't modify):"
+    const bin = atob(b64);
+    const enc = Uint8Array.from(bin, c => c.charCodeAt(0));
+    const dec = new aesjs.ModeOfOperation.ecb(META_KEY).decrypt(enc);
+    const pad = dec[dec.length - 1];
+    const text = new TextDecoder().decode(dec.subarray(0, dec.length - pad));
+    const json = JSON.parse(text.replace(/^music:/, ''));
+    return {
+      title: json.musicName || '',
+      artist: (json.artist || []).map(a => a[0]).join(' / '),
+      album: json.album || '',
+    };
+  } catch {
+    return null;
+  }
+}
 
 function identifyAudio(bytes) {
   const starts = text => Array.from(text).every((char, i) => bytes[i] === char.charCodeAt(0));
@@ -64,7 +89,10 @@ function decodeNcm(buffer) {
     box[i] = box[last];
     box[last] = swap;
   }
-  skip(readLength());
+  const metaLength = readLength();
+  requireBytes(metaLength);
+  const meta = metaLength ? decodeMeta(data.slice(offset, offset + metaLength)) : null;
+  offset += metaLength;
   skip(5);
   const coverLength = readLength();
   const imageLength = readLength();
@@ -76,7 +104,7 @@ function decodeNcm(buffer) {
     const j = (i + 1) & 255;
     audio[i] ^= box[(box[j] + box[(box[j] + j) & 255]) & 255];
   }
-  return { ...identifyAudio(audio), offset };
+  return { ...identifyAudio(audio), offset, meta };
 }
 
 self.onmessage = async event => {

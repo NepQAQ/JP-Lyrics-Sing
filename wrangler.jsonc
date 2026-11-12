@@ -22,10 +22,11 @@
     "DATAVERSE_CLIENT_ID": "7b6dfd26-3ce6-48b1-8ba5-6ed8f2faa974",
     // 免费版 Workers 每请求约 10ms CPU，默认 100000 迭代可能触发 1102；
     // 行内 jls_iterations 列保证存量账号按注册时的迭代数验证
-    "PBKDF2_ITERATIONS": "10000"
-    // 音频云端存储（可选，未配置时音频仅本地同步，歌词/配置仍同步）：
-    // "SHAREPOINT_SITE_ID": "site-guid",
-    // "SHAREPOINT_DRIVE_ID": "drive-guid",
+    "PBKDF2_ITERATIONS": "10000",
+    // 音频云端存储（SharePoint/OneDrive 文档库，非机密资源标识符，可提交）：
+    // 站点 ID 为 Graph 复合格式「host,siteGuid,webGuid」（含逗号）；未配置时音频仅本地，歌词/配置仍同步
+    "SHAREPOINT_SITE_ID": "mhy123-my.sharepoint.com,1e59acd3-b927-4d9b-8458-8af151af5230,7d5b26e6-06a2-4ccb-a79f-d3c5ad8dd98e",
+    "SHAREPOINT_DRIVE_ID": "b!06xZHie5m02EWIrxUa9SMOYmW32iBstMp5_Txa2N2Y5ZXvNUdV8URrWZoP8_AjKo"
     // "DATAVERSE_PREFIX": "jls"
   },
   // 生产环境：CF 上新建的「生产」Git 项目部署命令需用 npx wrangler deploy -e production，

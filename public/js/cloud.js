@@ -95,6 +95,27 @@ export function parseJsonSafe(text) {
   }
 }
 
+/** 音频签名（size:mime:name）——「上传一次」语义的指纹；无音频返回 null。 */
+export function audioSig(song) {
+  const a = song?.audio;
+  return a ? `${a.size}:${a.mime}:${a.name}` : null;
+}
+
+/**
+ * 需要补传音频的歌曲 id：有音频元数据且签名缺失或变化。
+ * sharepoint 未配置期间 syncAudioForSong 不记录签名，因此配置翻转后
+ * 全部本地音频都会出现在这里——「立即同步」/登录自动补传，无需清缓存。
+ */
+export function songsNeedingAudioUpload(songs, sigs) {
+  const out = [];
+  for (const song of songs || []) {
+    if (!song?.id) continue;
+    const sig = audioSig(song);
+    if (sig && sigs?.[song.id] !== sig) out.push(song.id);
+  }
+  return out;
+}
+
 // =============================================================== 初始化
 
 export function init() {
@@ -104,7 +125,11 @@ export function init() {
     pushQueue.clear();
     lastError = null;
     if (user) {
-      pullAndMerge().catch(() => {});
+      // 登录时刷新云端状态（捕获会话期间 sharepoint 配置翻转），拉取合并后补传本地音频
+      fetchStatus()
+        .then(() => pullAndMerge())
+        .then(() => uploadMissingAudio())
+        .catch(() => {});
     } else {
       updateStatusUI();
     }
@@ -117,13 +142,20 @@ export function init() {
 
   bus.on('cloud:sync-now', () => {
     if (!isLoggedIn()) return;
-    flushPushes()
-      .catch(() => {})
-      .finally(() => {
-        pullAndMerge()
-          .then(() => downloadMissingAudio())
-          .catch(() => {});
-      });
+    (async () => {
+      // 先刷新云端状态：部署后 sharepoint 翻转在此生效（失败保留已知状态）
+      await fetchStatus();
+      await flushPushes().catch(() => {});
+      await pullAndMerge().catch(() => {});
+      const downloaded = await downloadMissingAudio().catch(() => 0);
+      const uploaded = await uploadMissingAudio().catch(() => 0);
+      if (downloaded || uploaded) {
+        const parts = [];
+        if (downloaded) parts.push(`下载 ${downloaded} 个音频`);
+        if (uploaded) parts.push(`上传 ${uploaded} 个音频`);
+        toast(`云同步完成：${parts.join('、')}`);
+      }
+    })();
   });
 
   // 页面隐藏 / 卸载前冲刷待推送内容
@@ -139,13 +171,12 @@ function fetchStatus() {
   statusPromise = fetch(proxyBase() + '/api/cloud/status')
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
-      cloudStatus = data?.cloud || null;
+      // 仅成功响应覆盖已知状态；失败/无效响应保留旧值（首次加载失败则保持 null = 未配置），
+      // 避免离线时把已知配置清空导致「立即同步」静默无动作
+      if (data?.cloud) cloudStatus = data.cloud;
       return cloudStatus;
     })
-    .catch(() => {
-      cloudStatus = null;
-      return null;
-    })
+    .catch(() => cloudStatus)
     .then((status) => {
       bus.emit('cloud:status', status);
       updateStatusUI();
@@ -305,6 +336,34 @@ async function downloadMissingAudio() {
   return count;
 }
 
+/**
+ * 补传本地音频：sharepoint 配置后（含会话期间状态翻转）扫描签名缺失/变化的
+ * 歌曲自动上传。未配置期间不记录签名，翻转后此处把全部本地音频补传一遍；
+ * 已上传的（签名一致）自动跳过，维持「上传一次」语义。
+ */
+async function uploadMissingAudio() {
+  if (!isLoggedIn() || !cloudStatus?.sharepoint) return 0;
+  const songs = await api.rawSongs();
+  const ids = songsNeedingAudioUpload(songs, loadAudioSigs());
+  const byId = new Map((songs || []).filter((s) => s?.id).map((s) => [s.id, s]));
+  let count = 0;
+  for (const id of ids) {
+    const song = byId.get(id);
+    const record = await api.getAudioBlob(id);
+    if (!record?.blob) continue; // 本地无音频数据（仅元数据），跳过
+    try {
+      await putCloudAudio(id, record.blob, song.audio.mime);
+      const sigs = loadAudioSigs();
+      sigs[id] = audioSig(song);
+      saveAudioSigs(sigs);
+      count++;
+    } catch {
+      // 单曲失败跳过，下次「立即同步」重试
+    }
+  }
+  return count;
+}
+
 // =============================================================== 推送
 
 function schedulePush(event) {
@@ -426,7 +485,7 @@ async function pushSong(id) {
 /** 音频只上传一次：签名（size:mime:name）变化才重传；删除音频时清理云端。 */
 async function syncAudioForSong(id, song) {
   const sigs = loadAudioSigs();
-  const sig = song.audio ? `${song.audio.size}:${song.audio.mime}:${song.audio.name}` : null;
+  const sig = audioSig(song);
 
   if (!sig) {
     // 本地已删除音频：若此前上传过，清理云端文件与签名

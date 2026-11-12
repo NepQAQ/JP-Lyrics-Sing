@@ -192,14 +192,19 @@ Cloudflare Worker（唯一后端入口，worker/src/）
 
    ```
    站点：JLS（https://contoso.sharepoint.com/sites/JLS）
-     SHAREPOINT_SITE_ID = 1a2b...,3c4d...
+     SHAREPOINT_SITE_ID = contoso.sharepoint.com,1a2b...,3c4d...
    已授予应用站点「write」权限（可读写站点内文件）。
    文档库（任选其一作为 SHAREPOINT_DRIVE_ID）：
-     Documents             SHAREPOINT_DRIVE_ID = b1c2...
+     Documents             SHAREPOINT_DRIVE_ID = b!1c2...
    ```
 
 4. 记下 `SHAREPOINT_SITE_ID` 与 `SHAREPOINT_DRIVE_ID`，回到应用注册移除 `Sites.FullControl.All`。
 5. （可选）撤销授权：`node scripts/grant-sharepoint-site.mjs --site <站点> --revoke`。
+
+> **站点 ID 是 Graph 复合格式** `host,siteGuid,webGuid`（三段逗号分隔，如
+> `contoso.sharepoint.com,1a2b3c4d-...,5e6f7g8h-...`）——含逗号是正常格式，原样填入
+> vars 即可，Graph API 直接接受。OneDrive 个人站点同样适用（host 为
+> `<用户名>-my.sharepoint.com`）。文档库 ID 通常以 `b!` 开头。
 
 > 不想配置音频存储？跳过本节即可——Worker 检测到 `SHAREPOINT_*` 缺失时，音频同步自动降级为仅本地，其余功能不受影响。
 
@@ -220,8 +225,8 @@ Cloudflare Worker（唯一后端入口，worker/src/）
   "DATAVERSE_TENANT_ID": "<租户 ID>",
   "DATAVERSE_ENV_URL": "https://<组织>.api.crm.dynamics.com",
   "DATAVERSE_CLIENT_ID": "<客户端 ID>",
-  "SHAREPOINT_SITE_ID": "<站点 ID>",
-  "SHAREPOINT_DRIVE_ID": "<文档库 ID>"
+  "SHAREPOINT_SITE_ID": "<host>,<siteGuid>,<webGuid>",
+  "SHAREPOINT_DRIVE_ID": "b!<文档库 ID>"
 }
 ```
 

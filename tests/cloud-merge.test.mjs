@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mergeSongs, mergeDictionary, mergeConfig, parseJsonSafe } from '../public/js/cloud.js';
+import { mergeSongs, mergeDictionary, mergeConfig, parseJsonSafe, audioSig, songsNeedingAudioUpload } from '../public/js/cloud.js';
 
 const song = (id, updatedAt) => ({ id, updatedAt, title: `t-${id}` });
 const remote = (songId, updatedAt) => ({ songId, updatedAt, title: `t-${songId}` });
@@ -121,4 +121,41 @@ test('parseJsonSafe：合法 JSON 解析、非法/空返回 null', () => {
   assert.equal(parseJsonSafe(''), null);
   assert.equal(parseJsonSafe(null), null);
   assert.equal(parseJsonSafe(undefined), null);
+});
+
+// ---------------------------------------------------------------- audioSig / songsNeedingAudioUpload
+
+test('audioSig：size:mime:name 指纹；无音频返回 null', () => {
+  assert.equal(audioSig({ audio: { size: 1024, mime: 'audio/mpeg', name: 'a.mp3' } }), '1024:audio/mpeg:a.mp3');
+  assert.equal(audioSig({}), null);
+  assert.equal(audioSig({ audio: null }), null);
+  assert.equal(audioSig(null), null);
+  assert.equal(audioSig(undefined), null);
+});
+
+test('songsNeedingAudioUpload：签名缺失或变化 → 补传；一致 → 跳过', () => {
+  const songs = [
+    { id: 'a', audio: { size: 1, mime: 'audio/mpeg', name: 'a.mp3' } },
+    { id: 'b', audio: { size: 2, mime: 'audio/mpeg', name: 'b.mp3' } },
+    { id: 'c', audio: { size: 3, mime: 'audio/mpeg', name: 'c.mp3' } },
+    { id: 'no-audio' },
+  ];
+  const sigs = { a: '1:audio/mpeg:a.mp3', b: '999:audio/mpeg:b.mp3' };
+  // a 签名一致跳过；b 签名变化补传；c 无记录补传；no-audio 无音频不涉及
+  assert.deepEqual(songsNeedingAudioUpload(songs, sigs), ['b', 'c']);
+});
+
+test('songsNeedingAudioUpload：空 sigs（sharepoint 翻转场景）→ 全部有音频的歌补传', () => {
+  const songs = [
+    { id: 'a', audio: { size: 1, mime: 'audio/mpeg', name: 'a.mp3' } },
+    { id: 'b', audio: { size: 2, mime: 'audio/mpeg', name: 'b.mp3' } },
+    { id: 'none' },
+  ];
+  assert.deepEqual(songsNeedingAudioUpload(songs, {}), ['a', 'b']);
+  assert.deepEqual(songsNeedingAudioUpload(songs, null), ['a', 'b']);
+});
+
+test('songsNeedingAudioUpload：空输入与脏数据安全', () => {
+  assert.deepEqual(songsNeedingAudioUpload(null, null), []);
+  assert.deepEqual(songsNeedingAudioUpload([null, { audio: { size: 1, mime: 'm', name: 'n' } }], {}), []);
 });

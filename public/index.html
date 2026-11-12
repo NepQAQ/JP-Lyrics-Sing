@@ -42,6 +42,12 @@
     <button id="btn-edit-mode" class="btn ghost lyrics-only" type="button" aria-pressed="false" title="编辑模式（E）：点击单词合并 / 拆分 / 高亮">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg><span class="hide-sm">编辑</span>
     </button>
+    <button id="btn-cloud-status" class="icon-btn cloud-status" type="button" title="云同步" aria-label="云同步状态" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4.5 4.5 0 0 1-.5-8.97A6 6 0 0 1 18.2 8.5 4 4 0 0 1 17.5 18z"/></svg>
+    </button>
+    <button id="btn-account" class="btn ghost account-btn" type="button" title="登录云同步账号" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg><span class="account-label">登录</span>
+    </button>
     <button id="btn-settings" class="icon-btn" type="button" title="显示设置" aria-label="显示设置">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
     </button>
@@ -108,6 +114,11 @@
     <label class="chk"><input type="checkbox" data-set="preservePitch" /> 变速时保持音高</label>
     <label class="chk"><input type="checkbox" data-set="applySameLines" /> 编辑时同步到本曲相同歌词（副歌）</label>
   </div>
+  <div class="set-group" id="cloud-settings-group" hidden>
+    <div class="set-label">云同步</div>
+    <label class="chk" title="登录后，歌曲 / 词典 / 设置自动同步到云端；关闭后本设备只保留本地数据"><input type="checkbox" data-set="cloudSync" /> 启用云同步推送</label>
+    <div id="cloud-sync-state" class="muted small"></div>
+  </div>
 </div>
 
 <!-- 更多菜单 -->
@@ -130,6 +141,17 @@
   <button type="button" data-cmd="reanalyze">重新分析未编辑的行</button>
   <div class="menu-sep"></div>
   <button type="button" data-cmd="export">导出（TXT / LRC）</button>
+</div>
+
+<!-- 账户菜单（登录后） -->
+<div id="account-menu" class="popover menu" hidden>
+  <div class="account-info">
+    <div id="account-name" class="account-name"></div>
+    <div id="account-email" class="muted small"></div>
+  </div>
+  <div class="menu-sep"></div>
+  <button type="button" id="btn-sync-now">立即同步</button>
+  <button type="button" id="btn-logout" class="danger">退出登录</button>
 </div>
 
 <!-- ============================== 主体 ============================== -->
@@ -439,6 +461,46 @@
     <button id="ex-txt" class="btn" type="button">下载 TXT</button>
     <button id="ex-lrc" class="btn" type="button">下载 LRC</button>
     <button id="ex-lrc-zh" class="btn" type="button">LRC（含中文）</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-auth" class="dlg" aria-labelledby="auth-h">
+  <div class="dlg-head">
+    <h3 id="auth-h">云同步账号</h3>
+    <button id="auth-close" class="icon-btn" type="button" aria-label="关闭" onclick="this.closest('dialog').close()">×</button>
+  </div>
+  <div class="dlg-body">
+    <p class="muted small">登录后，歌曲、词典与设置自动同步到云端。不登录也可正常使用，数据仅保存在本地。</p>
+    <div class="seg auth-tabs">
+      <button type="button" id="auth-tab-login" class="active">登录</button>
+      <button type="button" id="auth-tab-register">注册</button>
+    </div>
+    <form id="auth-form" class="auth-form">
+      <label class="field"><span>用户名</span><input id="auth-username" class="input" autocomplete="username" required minlength="3" maxlength="32" /></label>
+      <label class="field" id="auth-email-field" hidden><span>邮箱（可选，用于找回）</span><input id="auth-email" class="input" type="email" autocomplete="email" maxlength="254" /></label>
+      <label class="field"><span>密码</span><input id="auth-password" class="input" type="password" autocomplete="current-password" required minlength="8" maxlength="128" /></label>
+      <p id="auth-error" class="auth-error" hidden></p>
+      <div class="form-row">
+        <span class="grow"></span>
+        <button id="auth-cancel" class="btn ghost" type="button">取消</button>
+        <button id="auth-submit" class="btn primary" type="submit">登录</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="dlg-cloud-upload" class="dlg" aria-labelledby="cu-h">
+  <div class="dlg-head">
+    <h3 id="cu-h">上传本地数据到云端</h3>
+    <button class="icon-btn" type="button" aria-label="关闭" onclick="this.closest('dialog').close()">×</button>
+  </div>
+  <div class="dlg-body">
+    <p>云端还没有数据。要把本机的 <b id="cloud-upload-count">0</b> 首歌曲、词典与设置上传到云端吗？</p>
+    <p class="muted small">上传后可在其他设备登录同一账号同步。音频文件较大，上传可能需要一些时间。</p>
+  </div>
+  <div class="dlg-foot">
+    <button id="cloud-upload-cancel" class="btn ghost" type="button">暂不上传</button>
+    <button id="cloud-upload-ok" class="btn primary" type="button">上传</button>
   </div>
 </dialog>
 

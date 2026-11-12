@@ -16,6 +16,8 @@ import { initStudy, syncStudyVoice } from './study.js';
 import { initExport, openExport } from './export.js';
 import { speak, stopSpeech } from './tts.js';
 import { lineStart } from './timing.js';
+import { init as initAuth } from './auth.js';
+import { init as initCloud } from './cloud.js';
 
 // ---------------------------------------------------------------- 设置
 const saveSettings = debounce(async (patch) => {
@@ -202,6 +204,29 @@ function setAppMode(mode) {
   if (mode === 'study') { stopSpeech(); ensureTokenizer().catch(() => {}); }
 }
 
+// ---------------------------------------------------------------- 云同步 UI
+function initCloudUI() {
+  bus.on('cloud:config-applied', ({ config } = {}) => {
+    if (!config) return;
+    Object.assign(state.settings, config);
+    applyDisplayClasses();
+    syncSettingsUI();
+    setRate(state.settings.playbackRate || 1, { save: false });
+    syncStudyVoice();
+    const audio = $('#audio');
+    if (audio) audio.preservesPitch = !!state.settings.preservePitch;
+  });
+  bus.on('cloud:dict-applied', ({ dict } = {}) => {
+    if (dict) setUserDict(dict);
+  });
+  bus.on('cloud:songs-applied', ({ ids } = {}) => {
+    refreshLibrary().catch(() => {});
+    if (state.song && Array.isArray(ids) && ids.includes(state.song.id)) {
+      openSong(state.song.id).catch(() => {});
+    }
+  });
+}
+
 // ---------------------------------------------------------------- 启动
 async function boot() {
   try {
@@ -222,6 +247,9 @@ async function boot() {
   initExport();
   initLyricsInteractions();
   initKeyboard();
+  initCloudUI();
+  initCloud(); // 绑定云同步监听（须在 initAuth 之前，确保收到 auth:changed）
+  initAuth().catch(() => {}); // 恢复会话（异步，不阻塞启动）
 
   const rateSel = $('#rate-select');
   rateSel.replaceChildren(...RATES.map(r => new Option(`${r}×`, String(r))));

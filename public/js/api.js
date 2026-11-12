@@ -4,7 +4,7 @@
 //               + Cloudflare Worker 代理（网易云 / Marumaru，路由见 worker/src/index.js）
 // 接口签名与衍生版 jp-lyrics-studio 的 server/app.py 保持一致，前端模块无需感知存储差异。
 import { cleanLine } from './state.js';
-import { sleep, downloadText } from './util.js';
+import { sleep, downloadText, bus } from './util.js';
 
 // =============================================================== 常量
 const SETTINGS_KEY = 'jls-settings';
@@ -32,6 +32,7 @@ const DEFAULT_SETTINGS = {
   segLead: 0.15,            // 单句播放提前开始（秒）
   segTrim: 0.2,             // 单句播放在下一句开始前提前结束（秒）
   autoWordTiming: true,     // 打开没有逐字时间轴的歌曲时自动获取
+  cloudSync: true,          // 登录后启用云同步（本地变更防抖推送）
 };
 
 const SONG_FIELDS = new Set(['title', 'artist', 'album', 'offset', 'timeline', 'duration', 'syncInfo']);
@@ -344,7 +345,13 @@ async function songTx(id, fn) {
       if (!settled) { settled = true; reject(err); }
       try { t.abort(); } catch { /* 事务已完成 */ }
     };
-    t.oncomplete = () => { if (!settled) { settled = true; resolve(result !== undefined ? result : songRef); } };
+    t.oncomplete = () => {
+      if (!settled) {
+        settled = true;
+        bus.emit('local:dirty', { type: 'song', id });
+        resolve(result !== undefined ? result : songRef);
+      }
+    };
     t.onerror = () => fail(t.error || new Error('IndexedDB 写入失败'));
     t.onabort = () => fail(t.error || new Error('IndexedDB 事务中止'));
     const getReq = t.objectStore('songs').get(id);
@@ -385,6 +392,7 @@ async function saveSettings(patch) {
     if (k in DEFAULT_SETTINGS) saved[k] = v;
   }
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(saved));
+  bus.emit('local:dirty', { type: 'settings' });
   return readSettings();
 }
 
@@ -421,6 +429,7 @@ async function saveDictionary(entries, remove = []) {
     t.onerror = () => reject(t.error || new Error('IndexedDB 写入失败'));
     t.onabort = () => reject(t.error || new Error('IndexedDB 事务中止'));
   });
+  bus.emit('local:dirty', { type: 'dictionary' });
   return dictionary();
 }
 
@@ -451,6 +460,7 @@ async function saveSong(song, opts = {}) {
   if (touch) song.updatedAt = now();
   if (song.lines) song.lines = song.lines.map(cleanLine);
   await idbPut('songs', song);
+  bus.emit('local:dirty', { type: 'song', id: song.id });
   return song;
 }
 
@@ -531,6 +541,7 @@ async function createSong(input, onProgress) {
     }
   }
   if (onProgress) onProgress(1);
+  bus.emit('local:dirty', { type: 'song', id: rec.id });
   return rec;
 }
 
@@ -551,6 +562,7 @@ async function importSong(payload) {
     duration: payload.duration,
   });
   await idbPut('songs', rec);
+  bus.emit('local:dirty', { type: 'song', id: rec.id });
   return { song: rec, existed: false };
 }
 
@@ -562,9 +574,7 @@ async function patchSong(id, patch) {
   });
 }
 
-async function deleteSong(id) {
-  const s = await idbGet('songs', id);
-  if (!s) throw new Error(`未找到：${id}`);
+async function deleteSongData(id) {
   const db = await openDB();
   await new Promise((resolve, reject) => {
     const t = db.transaction(['songs', 'history', 'snapshots', 'audio'], 'readwrite');
@@ -578,6 +588,14 @@ async function deleteSong(id) {
   });
   revokeAudioUrl(id);
   return { ok: true };
+}
+
+async function deleteSong(id) {
+  const s = await idbGet('songs', id);
+  if (!s) throw new Error(`未找到：${id}`);
+  const out = await deleteSongData(id);
+  bus.emit('local:dirty', { type: 'song-delete', id });
+  return out;
 }
 
 // =============================================================== 音频（IndexedDB Blob + object URL）
@@ -876,7 +894,7 @@ async function downloadLrc(id, zh = false) {
 // jplrc-proxy-off=1 可临时关闭网易云源。
 const PROXY_FALLBACK = 'https://jp-lyrics-proxy.nepqaq.workers.dev';
 
-function proxyBase() {
+export function proxyBase() {
   try {
     const custom = String(localStorage.getItem('jplrc-proxy-base') || '').trim();
     if (custom) return custom.replace(/\/+$/, '');
@@ -1178,6 +1196,72 @@ async function translate(texts) {
   return { results: out };
 }
 
+// =============================================================== 云同步底层（cloud.js 专用）
+// 这些方法直接读写 IndexedDB 且不触发 local:dirty 事件，
+// 供云同步引擎在「拉取合并」时应用远端数据，避免推送回环。
+
+async function rawSongs() {
+  const rows = await idbGetAll('songs');
+  return rows.map((s) => ({ ...s, lines: (s.lines || []).map(cleanLine) }));
+}
+
+async function rawSong(id) {
+  const s = await idbGet('songs', id);
+  if (!s) return null;
+  s.lines = (s.lines || []).map(cleanLine);
+  return s;
+}
+
+/** 按原样写入歌曲记录（不更新 updatedAt，不触发同步事件）。 */
+async function putSongRaw(song) {
+  const rec = { ...song, lines: (song.lines || []).map(cleanLine) };
+  await idbPut('songs', rec);
+  return rec;
+}
+
+/** 写入音频 Blob（不动歌曲记录的 updatedAt）。返回与 song.audio 一致的元数据。 */
+async function putAudioRaw(songId, blob, mime, size, name) {
+  let ext = String(name || '').split('.').pop().toLowerCase();
+  if (!EXT_MIME[ext]) ext = AUDIO_EXT[String(mime || '').split(';')[0].trim().toLowerCase()];
+  if (!EXT_MIME[ext]) throw new Error(`无法识别的音频格式：${mime || name}`);
+  const meta = {
+    file: `${songId}.${ext}`,
+    mime: EXT_MIME[ext],
+    size: size || blob.size,
+    name: name || `${songId}.${ext}`,
+  };
+  await idbPut('audio', { songId, blob, ...meta });
+  return meta;
+}
+
+async function getAudioBlob(id) {
+  return (await idbGet('audio', id)) || null;
+}
+
+/** 按原样写入词典条目（保留各自的 updatedAt，不触发同步事件）。 */
+async function putDictionaryRaw(entries) {
+  const db = await openDB();
+  await new Promise((resolve, reject) => {
+    const t = db.transaction('dictionary', 'readwrite');
+    const store = t.objectStore('dictionary');
+    for (const [surface, val] of Object.entries(entries || {})) {
+      const key = String(surface).trim();
+      if (!key || !val || typeof val !== 'object') continue;
+      store.put({
+        surface: key,
+        k: String(val.k || ''),
+        r: String(val.r || ''),
+        fixed: val.fixed === undefined ? true : !!val.fixed,
+        updatedAt: Number(val.updatedAt) || now(),
+      });
+    }
+    t.oncomplete = resolve;
+    t.onerror = () => reject(t.error || new Error('IndexedDB 写入失败'));
+    t.onabort = () => reject(t.error || new Error('IndexedDB 事务中止'));
+  });
+  return dictionary();
+}
+
 // =============================================================== 对外接口（与衍生版 server/app.py 的 API 形状一致）
 export const api = {
   settings,
@@ -1194,6 +1278,15 @@ export const api = {
   uploadAudio,
   deleteAudio,
   audioUrl,
+
+  // 云同步底层（cloud.js 使用；不触发 local:dirty）
+  rawSongs,
+  rawSong,
+  putSongRaw,
+  putAudioRaw,
+  getAudioBlob,
+  putDictionaryRaw,
+  deleteSongRaw: deleteSongData,
 
   /** lines: [{id, ...fields}]；record=true 写入编辑历史 */
   patchLines,

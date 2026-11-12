@@ -419,8 +419,8 @@ async function handlePutSong(request, url, env, songId) {
 
   const s = schema(env);
   const badges = stringifyField(body?.badges);
-  if (badges.length > 4000) {
-    throw new ApiError(413, 'PAYLOAD_TOO_LARGE', '歌曲元数据过大（上限 4000 字符）');
+  if (badges.length > 65536) {
+    throw new ApiError(413, 'PAYLOAD_TOO_LARGE', '歌曲元数据过大（上限 65536 字符）');
   }
 
   // LWW 依据：客户端 updated_at（epoch ms 字符串）

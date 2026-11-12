@@ -146,7 +146,9 @@ function intAttr(schemaName, displayName, { required = 'None' } = {}) {
 
 /**
  * 多行文本（Memo）列：自定义 String 列上限 4000 字符（与格式无关，超限报 0x80090479），
- * 大 JSON 载荷必须用 Memo，上限 1048576 字符。
+ * 大 JSON 载荷必须用 Memo，上限 1048576 字符。JSON 类列一律用 Memo 还可避开
+ * SQL 8060 字节行宽上限：一次建表请求中 String 列总宽超限时 Dataverse 不报错
+ * 而是静默缩列（元数据 MaxLength 不变、SQL 实际容量变小），写入时才报截断。
  */
 function memoAttr(schemaName, displayName, maxLength, { required = 'None', description = '' } = {}) {
   return {
@@ -309,7 +311,7 @@ async function main() {
         stringAttr(`${P}_Title`, 'Title', 200, { primary: true }),
         stringAttr(`${P}_Song_Id`, 'Song ID', 64, { required: 'ApplicationRequired' }),
         stringAttr(`${P}_Artist`, 'Artist', 200),
-        stringAttr(`${P}_Badges`, 'Badges JSON', 4000),
+        memoAttr(`${P}_Badges`, 'Badges JSON', MAX_JSON),
         memoAttr(`${P}_Lyric_Json`, 'Lyric JSON', MAX_JSON),
         stringAttr(`${P}_Audio_Path`, 'Audio Path', 400),
         stringAttr(`${P}_Updated_At`, 'Updated At', 32),

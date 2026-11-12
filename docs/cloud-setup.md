@@ -157,7 +157,7 @@ Cloudflare Worker（唯一后端入口，worker/src/）
 | `jls_song_id` | String(64) | 客户端歌曲 ID（与 IndexedDB 一致） |
 | `jls_owner` | Lookup → jls_user | 所属账号（级联删除）；导航属性 `jls_Owner`，绑定 `jls_Owner@odata.bind`，过滤 `_jls_owner_value` |
 | `jls_artist` | String(200) | 歌手 |
-| `jls_badges` | String(4000) | 列表元数据 JSON（时长 / 徽章 / 音频信息） |
+| `jls_badges` | Memo(1048576) | 列表元数据 JSON（时长 / 徽章 / 音频信息） |
 | `jls_lyric_json` | Memo(1048576) | 整曲歌词 JSON（多行文本列上限即 1048576 字符） |
 | `jls_audio_path` | String(400) | SharePoint 路径 `Songs/{userId}/{songId}` |
 | `jls_updated_at` | String(32) | 客户端 epoch 毫秒（LWW 用） |
@@ -165,8 +165,13 @@ Cloudflare Worker（唯一后端入口，worker/src/）
 > **命名与大小写注意**：owner 查找列的 OData **导航属性名**保留 Lookup SchemaName 的大小写，
 > 即 `{prefix}_Owner`（如 `jls_Owner`）——创建行必须用 `jls_Owner@odata.bind` 绑定注解
 > （OData 绑定大小写敏感，小写 `jls_owner` 会报 400 "undeclared property"）；
-> 而过滤用的**结构属性** `_jls_owner_value` 是小写。大 JSON 列（config / dictionary / lyric）
+> 而过滤用的**结构属性** `_jls_owner_value` 是小写。大 JSON 列（config / dictionary / lyric / badges）
 > 必须用 Memo（多行文本）类型：自定义 String 列上限 4000 字符，与格式无关。
+>
+> **String 列总宽与 SQL 行宽上限**：一次建表请求中 String 列总宽超过 SQL 8060 字节行上限时，
+> Dataverse **不报错而是静默缩列**——元数据仍声称原 MaxLength，但 SQL 实际容量变小
+> （如 badges 实际只剩 ~100-150 字符），写入时才报 "String or binary data would be truncated"。
+> Memo 列存扩展表不受行宽限制，因此 JSON 类列一律用 Memo。
 
 ## 4. SharePoint 站点授权
 

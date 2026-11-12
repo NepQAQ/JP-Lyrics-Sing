@@ -171,6 +171,22 @@ export function lineStart(line) {
   return wt?.length ? wt[0].starttime / 1000 : (line?.time ?? 0);
 }
 
+/** 点击歌词行 / 跳行时的预滚量（秒）：seek 到行开始前一点，防行首被切。 */
+export const LINE_PREROLL = 0.05;
+// 行查找容差：略大于预滚，保证预滚窗口内（暂停点击/跳行后）仍命中目标行而非上一行
+const LINE_IDX_EPSILON = LINE_PREROLL + 0.01;
+
+/** t 时刻应高亮的行下标：最后一个 lineStart ≤ t + 容差 的行（二分，行需按开始时间升序）；无命中返回 -1。 */
+export function findActiveLineIdx(lines, t) {
+  const arr = lines || [];
+  let lo = 0, hi = arr.length - 1, idx = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (lineStart(arr[mid]) <= t + LINE_IDX_EPSILON) { idx = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return idx;
+}
+
 export function nextStart(lines, idx) {
   const s = lineStart(lines[idx]);
   for (let j = idx + 1; j < lines.length; j++) {

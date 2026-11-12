@@ -15,7 +15,7 @@ import { initSearch, openSearch, openMarumaru } from './search.js';
 import { initStudy, syncStudyVoice } from './study.js';
 import { initExport, openExport } from './export.js';
 import { speak, stopSpeech } from './tts.js';
-import { lineStart } from './timing.js';
+import { lineStart, LINE_PREROLL } from './timing.js';
 import { init as initAuth } from './auth.js';
 import { init as initCloud } from './cloud.js';
 
@@ -118,7 +118,7 @@ function initLyricsInteractions() {
     }
     if (window.getSelection()?.toString()) return;
     clearSegment();
-    seekLyric(Math.max(0, lineStart(line) - 0.05));
+    seekLyric(Math.max(0, lineStart(line) - LINE_PREROLL));
     if (state.settings.viewMode !== 'read' || player.mode === 'timer') centerLine(lineEl);
   });
   view.addEventListener('dblclick', (e) => {

@@ -3,7 +3,7 @@ import { $, $$, fmtTime, toast, bus, setStatus, debounce } from './util.js';
 import { state } from './state.js';
 import { api } from './api.js';
 import { renderLineContent } from './render.js';
-import { lineStart, segmentRange, karaokeProgress, weightedChars } from './timing.js';
+import { lineStart, segmentRange, karaokeProgress, weightedChars, findActiveLineIdx, LINE_PREROLL } from './timing.js';
 
 export const RATES = [0.5, 0.6, 0.75, 0.85, 1, 1.25, 1.5];
 const audio = () => $('#audio');
@@ -171,21 +171,11 @@ function startLoop() {
   rafId = requestAnimationFrame(tick);
 }
 
-function findIdx(t) {
-  const lines = state.song?.lines || [];
-  let lo = 0, hi = lines.length - 1, idx = -1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (lineStart(lines[mid]) <= t + 1e-3) { idx = mid; lo = mid + 1; } else hi = mid - 1;
-  }
-  return idx;
-}
-
 export function syncHighlight(forceCenter = false) {
   const lines = state.song?.lines;
   if (!lines?.length) return;
   const t = lyricTime();
-  const idx = findIdx(t);
+  const idx = findActiveLineIdx(lines, t);
   if (idx !== state.activeIdx) {
     const prev = lines[state.activeIdx];
     if (prev?._el) {
@@ -376,7 +366,7 @@ export function stepLine(dir) {
     player.segment = { lineId: lines[next].id, start, end, loop: true };
     updateSegmentUI();
   }
-  seekLyric(Math.max(0, lineStart(lines[next]) - 0.05));
+  seekLyric(Math.max(0, lineStart(lines[next]) - LINE_PREROLL));
   centerLine(lines[next]._el);
 }
 

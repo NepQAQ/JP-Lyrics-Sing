@@ -8,5 +8,14 @@
   },
   "vars": {
     "ALLOWED_ORIGINS": "https://nepqaq.github.io,http://localhost:8765,http://127.0.0.1:8765"
+    // 云同步（可选，未配置时 /api/auth/*、/api/cloud/* 返回「未配置」，代理路由不受影响）：
+    // 详见 docs/cloud-setup.md；secrets 用 `wrangler secret put` 设置，不要写进本文件
+    // "DATAVERSE_TENANT_ID": "00000000-0000-0000-0000-000000000000",
+    // "DATAVERSE_ENV_URL": "https://org.api.crm.dynamics.com",
+    // "DATAVERSE_CLIENT_ID": "00000000-0000-0000-0000-000000000000",
+    // "SHAREPOINT_SITE_ID": "site-guid",
+    // "SHAREPOINT_DRIVE_ID": "drive-guid",
+    // "DATAVERSE_PREFIX": "jls",
+    // "PBKDF2_ITERATIONS": "100000"
   }
 }

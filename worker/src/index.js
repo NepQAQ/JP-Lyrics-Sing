@@ -8,10 +8,20 @@
  *   GET /api/marumaru/search/<关键词>
  *   GET /api/marumaru/lyric?url=japanese-song/play-xxxx
  *
+ * 云同步（自建账号，详见 docs/cloud-setup.md）：
+ *   POST /api/auth/register | /api/auth/login
+ *   GET  /api/auth/me | /api/cloud/status
+ *   GET/PUT /api/cloud/user-data
+ *   GET/PUT/DELETE /api/cloud/songs[/<songId>]
+ *   GET/PUT/DELETE /api/cloud/audio
+ *
  * 数据源：
  *   - 网易云音乐网页端歌词接口（无需登录），提供 yrc 逐字时间轴、ytlrc 中文翻译、yromalrc 罗马音。
  *   - marumaru-x.com（国内直连）：补充带 ruby 注音的歌词与中文翻译。
  */
+
+import { ApiError, jsonResponse, corsHeaders, isAllowedOrigin, normalizePath, errorResponse } from './http.js';
+import { isCloudPath, handleCloudApi } from './cloud.js';
 
 const UPSTREAM_TIMEOUT_MS = 12000;
 const SEARCH_CACHE_TTL = 60 * 60; // 1 小时
@@ -39,19 +49,16 @@ const MARUMARU_HEADERS = {
   'Accept-Language': 'ja;q=0.9,zh-CN,zh;q=0.8,en;q=0.7',
 };
 
-class ApiError extends Error {
-  constructor(status, code, message) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.code = code;
-  }
-}
-
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = normalizePath(url.pathname);
+
+    // 云同步 / 自建账号路由：独立处理 CORS、方法与鉴权，不影响下方代理逻辑
+    if (isCloudPath(path)) {
+      return handleCloudApi(request, url, env, ctx);
+    }
+
     const origin = request.headers.get('Origin');
 
     if (origin && !isAllowedOrigin(origin, env)) {
@@ -929,70 +936,6 @@ async function cachedJson(ctx, request, bucket, params, ttlSeconds, producer, sh
 
   ctx.waitUntil(cache.put(cacheKey, stored));
   return { data, state: 'MISS' };
-}
-
-function errorResponse(error, request, env) {
-  if (error instanceof ApiError) {
-    return jsonResponse(
-      { error: { code: error.code, message: error.message } },
-      { status: error.status, request, env }
-    );
-  }
-
-  console.error('[jp-lyrics-proxy]', error);
-  return jsonResponse(
-    { error: { code: 'INTERNAL_ERROR', message: '歌词服务暂时不可用' } },
-    { status: 500, request, env }
-  );
-}
-
-function jsonResponse(data, { status = 200, request, env, cacheControl = 'no-store', headers = {} } = {}) {
-  const responseHeaders = new Headers({
-    'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': cacheControl,
-    'X-Content-Type-Options': 'nosniff',
-    ...corsHeaders(request, env),
-  });
-
-  for (const [key, value] of Object.entries(headers)) {
-    responseHeaders.set(key, value);
-  }
-
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: responseHeaders,
-  });
-}
-
-function corsHeaders(request, env) {
-  const origin = request?.headers?.get('Origin');
-  if (!origin || !isAllowedOrigin(origin, env)) return {};
-
-  return {
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Max-Age': '86400',
-    'Access-Control-Expose-Headers': 'X-Cache',
-    'Vary': 'Origin',
-  };
-}
-
-function isAllowedOrigin(origin, env) {
-  if (typeof origin !== 'string' || !origin) return false;
-  if (/^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/i.test(origin)) return true;
-
-  const allowed = String(env?.ALLOWED_ORIGINS || '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  return allowed.includes(origin);
-}
-
-function normalizePath(pathname) {
-  const path = String(pathname || '/').replace(/\/+$/, '');
-  return path || '/';
 }
 
 function cleanQuery(value) {

@@ -1,0 +1,21 @@
+# 云同步本地开发环境变量模板（复制为 .dev.vars 后填写，.dev.vars 已被 .gitignore 忽略）
+# 完整配置步骤见 docs/cloud-setup.md
+#
+# Dataverse（结构化数据：账号 / 配置 / 歌词）
+DATAVERSE_TENANT_ID=00000000-0000-0000-0000-000000000000
+DATAVERSE_ENV_URL=https://org.api.crm.dynamics.com
+DATAVERSE_CLIENT_ID=00000000-0000-0000-0000-000000000000
+DATAVERSE_CLIENT_SECRET=your-client-secret
+
+# JWT 会话密钥（至少 32 字符的随机字符串，例如：openssl rand -hex 32）
+JWT_SECRET=change-me-to-a-random-32-plus-char-string
+
+# SharePoint 音频存储（可选；不填则音频仅本地，歌词/配置仍同步）
+SHAREPOINT_SITE_ID=
+SHAREPOINT_DRIVE_ID=
+
+# 可选项
+# 表名前缀（默认 jls；若环境强制其他发布者前缀，见 docs/cloud-setup.md）
+#DATAVERSE_PREFIX=jls
+# PBKDF2 迭代次数（默认 100000；免费版 Worker 10ms CPU 限制可能需调低，如 50000）
+#PBKDF2_ITERATIONS=100000

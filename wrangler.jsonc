@@ -15,6 +15,15 @@
   },
   "vars": {
     "ALLOWED_ORIGINS": "https://nepqaq.github.io,http://localhost:8765,http://127.0.0.1:8765"
+    // 云同步（可选，未配置时 /api/auth/*、/api/cloud/* 返回「未配置」，游客模式零影响）：
+    // 详见 docs/cloud-setup.md；secrets 用 `wrangler secret put` 设置，不要写进本文件
+    // "DATAVERSE_TENANT_ID": "00000000-0000-0000-0000-000000000000",
+    // "DATAVERSE_ENV_URL": "https://org.api.crm.dynamics.com",
+    // "DATAVERSE_CLIENT_ID": "00000000-0000-0000-0000-000000000000",
+    // "SHAREPOINT_SITE_ID": "site-guid",
+    // "SHAREPOINT_DRIVE_ID": "drive-guid",
+    // "DATAVERSE_PREFIX": "jls",
+    // "PBKDF2_ITERATIONS": "100000"
   },
   // 生产环境：CF 上新建的「生产」Git 项目部署命令需用 npx wrangler deploy -e production，
   // 未指定环境（dev 项目）仍走顶层配置，两者互不影响

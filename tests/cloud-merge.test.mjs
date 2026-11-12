@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mergeSongs, mergeDictionary, mergeConfig, parseJsonSafe, audioSig, songsNeedingAudioUpload, resolvePushAudioPath } from '../public/js/cloud.js';
+import { mergeSongs, mergeDictionary, mergeConfig, parseJsonSafe, audioSig, songsNeedingAudioUpload, resolvePushAudioPath, noAudioDecisionKey } from '../public/js/cloud.js';
 
 const song = (id, updatedAt) => ({ id, updatedAt, title: `t-${id}` });
 const remote = (songId, updatedAt) => ({ songId, updatedAt, title: `t-${songId}` });
@@ -202,4 +202,46 @@ test('resolvePushAudioPath：无音频 / 缺 uid / 缺 id → null', () => {
 test('resolvePushAudioPath：cloud 决策缺 path（脏数据）→ 不发共享路径', () => {
   const decisions = { s1: { sig: SIG, choice: 'cloud' } };
   assert.equal(resolvePushAudioPath({ sig: SIG, uid: 'u1', id: 's1', decisions, sigs: {} }), null);
+});
+
+// ---------------------------------------------------------------- 无音频查重（任务 2）
+
+test('resolvePushAudioPath：无音频 + pending cloud 决策（无 sig）→ 共享路径（行驱动下载前置）', () => {
+  const decisions = { s1: { key: 'song artist', choice: 'cloud', path: 'Songs/other/song-x' } };
+  assert.equal(resolvePushAudioPath({ sig: null, uid: 'u1', id: 's1', decisions, sigs: {} }), 'Songs/other/song-x');
+});
+
+test('resolvePushAudioPath：无音频 + own 决策（无 sig）→ null（无音频可引用）', () => {
+  const decisions = { s1: { key: 'song artist', choice: 'own' } };
+  assert.equal(resolvePushAudioPath({ sig: null, uid: 'u1', id: 's1', decisions, sigs: {} }), null);
+});
+
+test('resolvePushAudioPath：无音频 + 决策带 sig（已升级）→ 不按 pending 处理', () => {
+  // 升级后的决策带 sig；歌曲无音频（本地又删了）→ 不引用共享路径
+  const decisions = { s1: { key: 'song artist', sig: SIG, choice: 'cloud', path: 'Songs/other/song-x' } };
+  assert.equal(resolvePushAudioPath({ sig: null, uid: 'u1', id: 's1', decisions, sigs: {} }), null);
+});
+
+test('resolvePushAudioPath：无音频 + pending 决策缺 path → null', () => {
+  const decisions = { s1: { key: 'song artist', choice: 'cloud' } };
+  assert.equal(resolvePushAudioPath({ sig: null, uid: 'u1', id: 's1', decisions, sigs: {} }), null);
+});
+
+// ---------------------------------------------------------------- noAudioDecisionKey
+
+test('noAudioDecisionKey：规范化 title+artist（trim/小写/压缩空白），与 Worker 匹配键同规则', () => {
+  assert.equal(noAudioDecisionKey('  Song   Name ', ' Artist  '), 'song name artist');
+  assert.equal(noAudioDecisionKey('Song Name', ''), 'song name');
+  assert.equal(noAudioDecisionKey('Song Name', null), 'song name');
+  // JS \s 含全角空白 \u3000，与 Worker 的 replace(/\s+/g,' ') 行为一致
+  assert.equal(noAudioDecisionKey('SONG　NAME', 'ARTIST'), 'song name artist');
+});
+
+test('noAudioDecisionKey：空输入返回空串（不触发查重）', () => {
+  assert.equal(noAudioDecisionKey('', ''), '');
+  assert.equal(noAudioDecisionKey(null, undefined), '');
+});
+
+test('noAudioDecisionKey：键变化（歌名/歌手编辑）→ 视为新决策', () => {
+  assert.notEqual(noAudioDecisionKey('old title', 'artist'), noAudioDecisionKey('new title', 'artist'));
 });

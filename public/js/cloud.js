@@ -21,6 +21,7 @@ let lastError = null;
 let pushTimer = null;
 let retryTimer = null;
 const pushQueue = new Map(); // key → { type, id? }
+const noAudioAsked = new Set(); // 本同步周期已弹过查重弹窗的歌曲 id（弹窗被关闭不存决策，防同周期重复询问）
 
 // =============================================================== 纯函数（node --test 可测）
 
@@ -122,17 +123,34 @@ export function songsNeedingAudioUpload(songs, sigs) {
  * - 已记录「使用云端副本」决策（sig 一致）→ 共享路径
  * - 已记录「自己上传」决策或本地签名表明已上传过（sig 一致）→ 自己的路径
  * - 首次上传前 → null（不发，PUT audio 成功后由 Worker 回写行内路径）
+ * - 无本地音频但已接受云端共享副本（决策无 sig，下载未完成/进行中）→ 共享路径
  * audio_path 由此可靠表示「云端存在音频及其位置」，查重不会命中幽灵路径。
  */
 export function resolvePushAudioPath({ sig, uid, id, decisions, sigs }) {
-  if (!sig || !uid || !id) return null;
+  if (!uid || !id) return null;
   const decision = decisions?.[id];
-  if (decision?.sig === sig) {
-    if (decision.choice === 'cloud' && decision.path) return decision.path;
-    if (decision.choice === 'own') return `Songs/${uid}/${id}`;
+  if (sig) {
+    if (decision?.sig === sig) {
+      if (decision.choice === 'cloud' && decision.path) return decision.path;
+      if (decision.choice === 'own') return `Songs/${uid}/${id}`;
+    }
+    if (sigs?.[id] === sig) return `Songs/${uid}/${id}`;
+    return null;
   }
-  if (sigs?.[id] === sig) return `Songs/${uid}/${id}`;
+  if (decision?.choice === 'cloud' && decision.path && !decision.sig) return decision.path;
   return null;
+}
+
+/**
+ * 无音频查重决策键：规范化 title+artist（与 Worker 查重匹配键同规则）。
+ * 无本地音频的歌 sig 为空，不能沿用 songId:sig 键控；歌名 / 歌手变化
+ * （键变）后重新走查重流程。
+ */
+export function noAudioDecisionKey(title, artist) {
+  const norm = (v) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const t = norm(title);
+  const a = norm(artist);
+  return a ? `${t} ${a}` : t;
 }
 
 // =============================================================== 初始化
@@ -143,6 +161,7 @@ export function init() {
   bus.on('auth:changed', ({ user }) => {
     pushQueue.clear();
     lastError = null;
+    noAudioAsked.clear();
     if (user) {
       // 登录时刷新云端状态（捕获会话期间 sharepoint 配置翻转），拉取合并后补传本地音频
       fetchStatus()
@@ -161,6 +180,7 @@ export function init() {
 
   bus.on('cloud:sync-now', () => {
     if (!isLoggedIn()) return;
+    noAudioAsked.clear();
     (async () => {
       // 先刷新云端状态：部署后 sharepoint 翻转在此生效（失败保留已知状态）
       await fetchStatus();
@@ -379,6 +399,15 @@ async function uploadMissingAudio() {
       // 单曲失败跳过，下次「立即同步」重试
     }
   }
+  // 无本地音频的歌曲也查重：云端已有其他用户副本时提示复用（顺序执行，避免多弹窗并发）
+  for (const song of songs || []) {
+    if (!song?.id || audioSig(song)) continue;
+    try {
+      await syncNoAudioSong(song.id, song);
+    } catch {
+      // 单曲失败跳过
+    }
+  }
   return count;
 }
 
@@ -467,9 +496,10 @@ async function pushUserData() {
   });
 }
 
-async function pushSong(id) {
+/** 推送歌曲行（不含音频同步）；返回推送时的本地记录（已删除返回 null）。 */
+async function pushSongRow(id) {
   const song = await api.rawSong(id);
-  if (!song) return; // 本地已删除，交给 song-delete 事件
+  if (!song) return null; // 本地已删除，交给 song-delete 事件
   const uid = authUser()?.id;
 
   const badges = {
@@ -502,8 +532,12 @@ async function pushSong(id) {
       }),
     },
   });
+  return song;
+}
 
-  await syncAudioForSong(id, song);
+async function pushSong(id) {
+  const song = await pushSongRow(id);
+  if (song) await syncAudioForSong(id, song);
 }
 
 /**
@@ -516,10 +550,11 @@ async function syncAudioForSong(id, song) {
   const sig = audioSig(song);
 
   if (!sig) {
-    // 本地已删除音频：若此前上传过，清理云端文件与签名
+    // 本地已删除音频：若此前上传过，清理云端文件、签名与查重决策
     if (sigs[id]) {
       delete sigs[id];
       saveAudioSigs(sigs);
+      clearAudioDecision(id);
       if (cloudStatus?.sharepoint) {
         try {
           await deleteCloudAudio(id);
@@ -527,7 +562,10 @@ async function syncAudioForSong(id, song) {
           // 清理失败不影响主流程
         }
       }
+      return;
     }
+    // 无本地音频：也做查重（云端已有其他用户副本时提示复用）
+    await syncNoAudioSong(id, song);
     return;
   }
 
@@ -550,12 +588,111 @@ async function syncAudioForSong(id, song) {
   saveAudioSigs(sigs);
 }
 
+/**
+ * 无本地音频歌曲的查重：云端已有其他用户副本时弹窗询问是否复用。
+ * 接受 → 引用共享路径并下载到本地（离线可播）；拒绝 → 记住决策不再问。
+ */
+async function syncNoAudioSong(id, song) {
+  if (!isLoggedIn() || !cloudStatus?.sharepoint) return;
+  if (noAudioAsked.has(id)) return; // 本周期已问过（弹窗被关闭不存决策）
+
+  const key = noAudioDecisionKey(song?.title, song?.artist);
+  if (!key) return;
+  const existing = loadAudioDecisions()[id];
+  // 无音频期已接受过同一首歌（键一致）→ 重试下载共享副本
+  if (!existing?.sig && existing?.key === key && existing.choice === 'cloud' && existing.path) {
+    await adoptCloudAudio(id, song, existing.path, key);
+    return;
+  }
+  // 无音频期已拒绝过同一首歌 → 不再问
+  if (!existing?.sig && existing?.key === key && existing.choice === 'own') return;
+
+  let hit = null;
+  try {
+    hit = await lookupCloudAudio(song?.title, song?.artist);
+  } catch {
+    return; // 查重失败不阻断
+  }
+  if (!hit?.found) return;
+
+  noAudioAsked.add(id);
+  const choice = await confirmReuseCloudAudio(hit, { localAudio: false });
+  if (choice === 'cloud') {
+    // 先存 pending 决策（无 sig）：行推送引用共享路径后才能行驱动下载
+    saveAudioDecisions({ ...loadAudioDecisions(), [id]: { key, choice: 'cloud', path: hit.audioPath } });
+    await adoptCloudAudio(id, song, hit.audioPath, key);
+  } else if (choice === 'own') {
+    saveAudioDecisions({ ...loadAudioDecisions(), [id]: { key, choice: 'own' } });
+  }
+  // 关闭弹窗：不存决策，本周期 noAudioAsked 已防重复
+}
+
+/**
+ * 采用云端共享副本：行引用共享路径 → 下载 → 本地落盘 → 升级决策（带 sig）
+ * → 重推歌曲行（音频元数据随 badges/lyricJson 上行，其他设备才会重新拉取）。
+ */
+async function adoptCloudAudio(id, song, path, key) {
+  // 1. 行内 audio_path 指向共享路径（GET 音频按行驱动路径解析）
+  await pushSongRow(id);
+  // 2. 下载共享副本（行驱动路径；mime 交给 Worker 按行/上游解析）
+  const blob = await downloadAudio(id, '');
+  if (!blob) return false; // 云端副本已被删除：清 pending 决策，下次重新查重
+  clearAudioDecision(id);
+
+  // 3. 本地落盘（IndexedDB），sig 与决策升级为 sig 键控
+  const mime = blob.type && blob.type.startsWith('audio/') ? blob.type : 'audio/mpeg';
+  const name = `${sanitizeFileBase(song?.title || id)}.${mimeExt(mime)}`;
+  const meta = await api.putAudioRaw(id, blob, mime, blob.size, name);
+  const sigs = loadAudioSigs();
+  sigs[id] = audioSig({ audio: meta });
+  saveAudioSigs(sigs);
+  saveAudioDecisions({ ...loadAudioDecisions(), [id]: { key, sig: audioSig({ audio: meta }), choice: 'cloud', path } });
+
+  // 4. updatedAt 前移 + 重推行：其他设备 mergeSongs 才会重新拉取这首歌
+  const fresh = await api.rawSong(id);
+  if (fresh) {
+    await api.putSongRaw({ ...fresh, audio: meta, updatedAt: Date.now() });
+    await pushSongRow(id);
+  }
+  bus.emit('cloud:songs-applied', { ids: [id] });
+  toast(`已使用云端副本：《${song?.title || '未知歌曲'}》`);
+  return true;
+}
+
+/** 文件名安全化（去掉路径分隔符与控制字符）。 */
+function sanitizeFileBase(v) {
+  return String(v || '').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 80) || 'audio';
+}
+
+/** mime → 常见扩展名（本地落盘文件名用）。 */
+function mimeExt(mime) {
+  const map = {
+    'audio/mpeg': 'mp3',
+    'audio/mp4': 'm4a',
+    'audio/aac': 'aac',
+    'audio/flac': 'flac',
+    'audio/ogg': 'ogg',
+    'audio/wav': 'wav',
+    'audio/webm': 'webm',
+  };
+  return map[mime] || 'mp3';
+}
+
 /** 查重决策：已有决策（sig 一致）直接沿用；否则查云端并按需弹窗询问。 */
 async function resolveAudioDecision(id, song, sig) {
   const decisions = loadAudioDecisions();
   const existing = decisions[id];
   if (existing?.sig === sig && (existing.choice === 'cloud' || existing.choice === 'own')) {
     return existing.choice;
+  }
+  // 无音频期拒绝过同一首歌（键一致）：升级为 sig 键控，不再询问
+  if (
+    !existing?.sig &&
+    existing?.key === noAudioDecisionKey(song.title, song.artist) &&
+    existing.choice === 'own'
+  ) {
+    saveAudioDecisions({ ...decisions, [id]: { sig, choice: 'own' } });
+    return 'own';
   }
 
   let hit = null;
@@ -590,6 +727,7 @@ async function pushSongDelete(id) {
     delete sigs[id];
     saveAudioSigs(sigs);
   }
+  clearAudioDecision(id);
 }
 
 // =============================================================== 音频传输
@@ -676,6 +814,13 @@ function saveAudioDecisions(map) {
   }
 }
 
+function clearAudioDecision(id) {
+  const decisions = loadAudioDecisions();
+  if (!(id in decisions)) return;
+  delete decisions[id];
+  saveAudioDecisions(decisions);
+}
+
 /** 查云端是否已有其他用户上传的同名歌曲音频（title+artist 规范化匹配）。 */
 async function lookupCloudAudio(title, artist) {
   const url = `${proxyBase()}/api/cloud/audio/lookup?title=${encodeURIComponent(title || '')}&artist=${encodeURIComponent(artist || '')}`;
@@ -687,7 +832,7 @@ async function lookupCloudAudio(title, artist) {
 }
 
 /** 弹窗询问是否复用云端副本；返回 'cloud' | 'own' | null（关闭弹窗）。 */
-function confirmReuseCloudAudio(hit) {
+function confirmReuseCloudAudio(hit, { localAudio = true } = {}) {
   return new Promise((resolve) => {
     const dlg = $('#dlg-audio-reuse');
     if (!dlg || typeof dlg.showModal !== 'function') {
@@ -696,8 +841,14 @@ function confirmReuseCloudAudio(hit) {
     }
     const titleEl = $('#audio-reuse-title');
     const artistEl = $('#audio-reuse-artist');
+    const hintEl = $('#audio-reuse-hint');
     if (titleEl) titleEl.textContent = hit.title || '未知歌曲';
     if (artistEl) artistEl.textContent = hit.artist || '未知歌手';
+    if (hintEl) {
+      hintEl.textContent = localAudio
+        ? '云端已有这首歌的音频（其他用户上传过），是否直接使用云端副本？'
+        : '云端已有其他用户上传的这首歌音频，是否使用云端副本？';
+    }
     const cloudBtn = $('#audio-reuse-cloud');
     const ownBtn = $('#audio-reuse-own');
     const cleanup = () => {

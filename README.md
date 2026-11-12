@@ -119,6 +119,30 @@ npx wrangler deploy
 
 部署后把 `wrangler.jsonc` 里的 `ALLOWED_ORIGINS` 改成你自己的站点域名（已默认允许 localhost 任意端口）。
 
+## 云同步（可选）
+
+Worker 可扩展为云同步后端：用户在前端注册**自建账号**（用户名 + 密码，无需任何微软账号），把设置、我的词典、歌词与上传的音频同步到云端。架构与数据流：
+
+```
+浏览器（本地优先，IndexedDB 仍是工作副本）
+        │  自建账号 JWT（Bearer）
+        ▼
+Cloudflare Worker（唯一后端入口）
+├── /api/auth/*、/api/cloud/*   账号 / 配置 / 词典 / 歌词
+│     └─ 服务主体（client credentials）→ Dataverse Web API
+└── /api/cloud/audio            音频二进制
+      └─ 服务主体 → Microsoft Graph → SharePoint 文档库（Sites.Selected）
+```
+
+特性：
+
+- **本地优先**：未登录时与纯本地版本完全一致；登录后拉取合并（逐曲按 `updated_at` last-write-wins），保存时写本地并防抖约 3 秒推云端；编辑历史 / 撤销永远纯本地。
+- **音频**：上传一次、下载后缓存进 IndexedDB；未配置 SharePoint 时音频仅本地，其余照常同步（UI 明示）。
+- **零构建不变**：前端仍是原生 ES Modules，无构建步骤。
+- **优雅降级**：云端未配置时前端不显示任何云同步 UI，游客模式零影响。
+
+自建部署需要配置 Entra 应用注册、Dataverse 应用用户与安全角色、SharePoint 站点授权（Sites.Selected）及 Worker secrets，完整步骤见 **[docs/cloud-setup.md](docs/cloud-setup.md)**；配套管理脚本在 `scripts/`（建表、SharePoint 授权、重置密码）。
+
 ## 快速开始
 
 推荐用本地静态服务器打开，避免浏览器在 `file://` 下拦截词典或接口请求。
@@ -131,12 +155,14 @@ python -m http.server -d public 8000
 
 ## 数据存储说明
 
-所有数据保存在**当前浏览器**中（不经过任何服务器）：
+默认所有数据保存在**当前浏览器**中（不经过任何服务器）：
 
 - `localStorage`：界面设置（主题、字号、显示开关、倍速、音色等）。
 - `IndexedDB`（库名 `jp-lyrics-studio`）：歌曲与歌词行、编辑历史与快照、我的词典、音频文件（Blob）。
 
 因此：换浏览器 / 换设备 / 清除站点数据后曲库会清空；重要歌曲请用「导出 LRC」备份。音频以 Blob 形式存储，播放时生成 object URL，支持进度拖动，但大音频文件会占用浏览器存储配额（通常数百 MB 起，各浏览器不同）。
+
+开启**云同步**（见上文「云同步」一节）后：设置、词典、歌词与音频会同步到云端（Dataverse + SharePoint，经自建 Worker），本地 IndexedDB 仍是工作副本，编辑历史与撤销保持纯本地。
 
 ## 本地 NCM 文件
 
@@ -174,8 +200,12 @@ NCM 算法参考 [ncmdump-js](https://github.com/ant-cave/ncmdump-js/tree/aa127b
 │   ├── ncm-worker.js     # NCM 还原 + 元数据解密（Web Worker）
 │   ├── lib/              # kuromoji.js、kuroshiro、aes-js、NCM-LICENSES.txt
 │   └── dict/             # kuromoji IPADIC 词典（长缓存）
-├── worker/               # Cloudflare Worker 代理（网易云 / Marumaru）
-├── tests/                # node --test 离线回归（ncm-worker）
+├── worker/               # Cloudflare Worker 代理（网易云 / Marumaru）+ 云同步后端
+│   └── src/              #   index.js（代理路由）、cloud.js（云同步路由）、auth.js（JWT/PBKDF2）、
+│                         #   dataverse.js、graph.js、http.js
+├── scripts/              # 云同步管理脚本（建表 / SharePoint 授权 / 重置密码）
+├── docs/                 # cloud-setup.md：云同步部署指南
+├── tests/                # node --test 离线回归（ncm-worker、云同步）
 ├── entry.js              # Worker 入口（wrangler 引用）
 └── wrangler.jsonc        # Worker 部署配置（静态资产指向 public/）
 ```
@@ -186,7 +216,7 @@ NCM 算法参考 [ncmdump-js](https://github.com/ant-cave/ncmdump-js/tree/aa127b
 
 ## 已知限制
 
-- 所有数据仅存当前浏览器，清除站点数据或换设备后曲库清空；重要歌曲请导出 LRC 备份。
+- 未开启云同步时，所有数据仅存当前浏览器，清除站点数据或换设备后曲库清空；重要歌曲请导出 LRC 备份（开启云同步后可跨设备恢复，见「云同步」一节）。
 - 首次生成假名需要加载 kuromoji 词典，可能需要等待几秒。
 - 直接双击打开 `index.html` 时，部分浏览器可能拦截本地词典请求；建议使用本地服务器。
 - PetitLyrics 逐字时间轴为日本曲库，非日语歌曲可能无数据；此时回退到线性估算渐变。

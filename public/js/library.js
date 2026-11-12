@@ -34,21 +34,59 @@ function renderLibrary() {
     else if (s.timeline === 'synthetic') badges.push('<span class="badge warn" title="纯文本歌词，时间为估算，可打轴">估算</span>');
     else badges.push('<span class="badge warn">无歌词</span>');
     if (s.editedCount) badges.push(`<span class="badge edit" title="手动修改过的行">✎ ${s.editedCount}</span>`);
-    const item = h('button', {
-      type: 'button',
+    // div 而非 button：HTML 不允许 button 嵌套 button（删除按钮）
+    const item = h('div', {
+      role: 'button',
+      tabindex: '0',
       class: `lib-item${state.song?.id === s.id ? ' current' : ''}`,
       dataset: { id: s.id },
-      html: `<div class="lib-title">${escapeHTML(s.title || '未命名')}</div>
-             <div class="lib-meta">${escapeHTML(s.artist || '')}${s.artist ? ' · ' : ''}${SOURCE_LABEL[s.source] || s.source} · ${s.lineCount} 行</div>
-             <div class="lib-badges">${badges.join('')}</div>`,
+      html: `<div class="lib-info">
+               <div class="lib-title">${escapeHTML(s.title || '未命名')}</div>
+               <div class="lib-meta">${escapeHTML(s.artist || '')}${s.artist ? ' · ' : ''}${SOURCE_LABEL[s.source] || s.source} · ${s.lineCount} 行</div>
+               <div class="lib-badges">${badges.join('')}</div>
+             </div>
+             <button class="icon-btn tiny lib-del" type="button" aria-label="从曲库删除" title="从曲库删除">×</button>`,
     });
-    item.addEventListener('click', async () => {
+    const open = async () => {
       await openSong(s.id);
       renderLibrary();
       if (window.matchMedia('(max-width: 900px)').matches) toggleSidebar(false);
+    };
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.lib-del')) return; // 删除按钮由自己的处理器接管
+      open().catch(() => {});
+    });
+    item.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (e.target.closest('.lib-del')) return; // 焦点在删除按钮上：交给按钮默认行为
+      e.preventDefault();
+      open().catch(() => {});
+    });
+    item.querySelector('.lib-del').addEventListener('click', (e) => {
+      e.stopPropagation(); // 防误触打开歌曲
+      deleteLibrarySong(s).catch(() => {});
     });
     return item;
   }));
+}
+
+/** 侧栏曲库删除：确认后删本地（云清理经 local:dirty song-delete 自动推送）。 */
+async function deleteLibrarySong(s) {
+  if (!s?.id) return;
+  const title = s.title || '未命名';
+  if (!confirm(`从曲库删除「${title}」？音频、歌词和全部修改记录都会被删除，无法恢复。`)) return;
+  try {
+    await api.deleteSong(s.id);
+    if (state.song?.id === s.id) {
+      state.song = null;
+      try { localStorage.removeItem('jls-last-song'); } catch {}
+      bus.emit('song:closed');
+    }
+    await refreshLibrary();
+    toast(`已删除「${title}」`);
+  } catch (e) {
+    toast('删除失败：' + (e.message || e), { error: true });
+  }
 }
 
 export function toggleSidebar(force) {

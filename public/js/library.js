@@ -73,9 +73,20 @@ function decodeNcm(file) {
   });
 }
 
+/** 判断是否 NCM 文件：扩展名或文件头魔数（Android 选择器可能返回无扩展名的文件名）。 */
+export async function isNcmFile(file) {
+  if (/\.ncm$/i.test(file.name || '')) return true;
+  try {
+    const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+    return String.fromCharCode(...head) === 'CTENFDAM';
+  } catch {
+    return false;
+  }
+}
+
 /** 统一准备上传的音频：NCM 先还原；返回 {blob, filename, meta} */
 export async function prepareAudio(file) {
-  if (/\.ncm$/i.test(file.name)) {
+  if (await isNcmFile(file)) {
     setStatus('正在本机还原 NCM…');
     const res = await decodeNcm(file);
     setStatus(`NCM 已还原为 ${res.format}`);
@@ -227,7 +238,7 @@ async function addFiles(fileList) {
   renderImport();
   // NCM 先在本机还原（并读出歌名 / 歌手）
   for (const entry of imp.files) {
-    if (entry.kind === 'audio' && /\.ncm$/i.test(entry.file.name) && !entry.prepared) {
+    if (entry.kind === 'audio' && !entry.prepared && await isNcmFile(entry.file)) {
       try {
         entry.prepared = await prepareAudio(entry.file);
         entry.meta = entry.prepared.meta;

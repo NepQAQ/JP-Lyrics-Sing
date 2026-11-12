@@ -330,7 +330,7 @@
   <div class="dlg-body">
     <div id="imp-drop" class="dropzone">
       <div class="file-row">
-        <label class="btn primary"><input id="imp-files" type="file" multiple accept="audio/*,.ncm,.flac,.m4a,.ape,.lrc,.txt" hidden />选择文件</label>
+        <label class="btn primary"><input id="imp-files" type="file" multiple hidden /><!-- 不设 accept：Android 文件选择器按 MIME 过滤会隐藏 .ncm 等无标准 MIME 的扩展名 -->选择文件</label>
         <span class="muted small">歌曲和歌词可以<b>一起选</b>，也可以直接拖到这里；会自动识别哪个是歌曲、哪个是歌词。多首歌一起选时按文件名自动配对。</span>
       </div>
       <div id="imp-filelist" class="imp-filelist"></div>
@@ -431,7 +431,7 @@
       <div class="field-label">音频</div>
       <div class="form-row">
         <span id="si-audio" class="muted small"></span>
-        <label class="btn small"><input id="si-audio-file" type="file" accept="audio/*,.ncm,.flac,.m4a" hidden />上传 / 更换音频</label>
+        <label class="btn small"><input id="si-audio-file" type="file" hidden /><!-- 不设 accept：Android 文件选择器按 MIME 过滤会隐藏 .ncm 等无标准 MIME 的扩展名 -->上传 / 更换音频</label>
         <button id="si-remove-audio" class="btn small ghost" type="button">删除音频</button>
       </div>
     </div>

@@ -15,7 +15,15 @@
  * 建表完成后建议撤销该角色（详见 docs/cloud-setup.md）。
  *
  * 幂等：已存在的表 / 列 / 关系会跳过（缺失的列会补齐），可安全重复执行。
- * 表逻辑名与 Worker 端 schema() 约定一致（worker/src/cloud.js）。
+ *
+ * 命名约定（与 Worker 端 schema() 一致，worker/src/cloud.js）：
+ * - 表 / 列的 SchemaName 用帕斯卡大小写 + 下划线（如 jls_User_Data、jls_Password_Hash），
+ *   逻辑名 = SchemaName 全小写（jls_user_data、jls_password_hash）；
+ *   无下划线的驼峰 SchemaName 会生成无下划线的逻辑名，导致与 Worker 端不匹配。
+ * - 实体集名显式声明（jls_users / jls_user_datas / jls_songs），不依赖自动复数化。
+ * - 大 JSON 列用 Memo（多行文本，上限 1048576 字符）；自定义 String 列上限 4000。
+ * - owner 查找列 SchemaName 为 {prefix}_Owner（帕斯卡）：OData 导航属性名保留该大小写
+ *   （jls_Owner@odata.bind），过滤用结构属性 _jls_owner_value（小写）。
  */
 
 // ---------------------------------------------------------------- 参数
@@ -136,10 +144,30 @@ function intAttr(schemaName, displayName, { required = 'None' } = {}) {
   };
 }
 
-function tableDef({ schemaName, displayName, collectionName, description, attributes }) {
+/**
+ * 多行文本（Memo）列：自定义 String 列上限 4000 字符（与格式无关，超限报 0x80090479），
+ * 大 JSON 载荷必须用 Memo，上限 1048576 字符。
+ */
+function memoAttr(schemaName, displayName, maxLength, { required = 'None', description = '' } = {}) {
+  return {
+    '@odata.type': 'Microsoft.Dynamics.CRM.MemoAttributeMetadata',
+    AttributeType: 'Memo',
+    AttributeTypeName: { Value: 'MemoType' },
+    SchemaName: schemaName,
+    DisplayName: label(displayName),
+    Description: label(description),
+    MaxLength: maxLength,
+    FormatName: { Value: 'TextArea' },
+    RequiredLevel: requiredLevel(required),
+  };
+}
+
+function tableDef({ schemaName, entitySetName, displayName, collectionName, description, attributes }) {
   return {
     '@odata.type': 'Microsoft.Dynamics.CRM.EntityMetadata',
     SchemaName: schemaName,
+    // 显式实体集名，与 Worker 端 setName()（逻辑名 + 's'）一致，避免自动复数化意外
+    EntitySetName: entitySetName,
     DisplayName: label(displayName),
     DisplayCollectionName: label(collectionName),
     Description: label(description),
@@ -214,7 +242,7 @@ async function ensureTable(def) {
     return;
   }
   await api('/EntityDefinitions', { method: 'POST', body: def });
-  console.log(`已创建表 ${logical}（实体集 ${logical}s）`);
+  console.log(`已创建表 ${logical}（实体集 ${def.EntitySetName}）`);
 }
 
 async function ensureRelationship(def) {
@@ -237,13 +265,14 @@ async function main() {
   await ensureTable(
     tableDef({
       schemaName: `${P}_User`,
+      entitySetName: `${P}_users`,
       displayName: 'JLS User',
       collectionName: 'JLS Users',
       description: 'JP Lyrics Studio cloud sync accounts',
       attributes: [
         stringAttr(`${P}_Username`, 'Username', 32, { required: 'ApplicationRequired', primary: true }),
         stringAttr(`${P}_Email`, 'Email', 254),
-        stringAttr(`${P}_PasswordHash`, 'Password Hash', 512),
+        stringAttr(`${P}_Password_Hash`, 'Password Hash', 512),
         stringAttr(`${P}_Salt`, 'Salt', 64),
         intAttr(`${P}_Iterations`, 'PBKDF2 Iterations'),
       ],
@@ -253,15 +282,16 @@ async function main() {
   // 2. 用户数据表（config + dictionary，每账号一行）
   await ensureTable(
     tableDef({
-      schemaName: `${P}_UserData`,
+      schemaName: `${P}_User_Data`,
+      entitySetName: `${P}_user_datas`,
       displayName: 'JLS User Data',
       collectionName: 'JLS User Data',
       description: 'Per-account config and dictionary JSON',
       attributes: [
         stringAttr(`${P}_Name`, 'Name', 100, { primary: true }),
-        stringAttr(`${P}_ConfigJson`, 'Config JSON', MAX_JSON, { format: 'TextArea' }),
-        stringAttr(`${P}_DictionaryJson`, 'Dictionary JSON', MAX_JSON, { format: 'TextArea' }),
-        stringAttr(`${P}_UpdatedAt`, 'Updated At', 32),
+        memoAttr(`${P}_Config_Json`, 'Config JSON', MAX_JSON),
+        memoAttr(`${P}_Dictionary_Json`, 'Dictionary JSON', MAX_JSON),
+        stringAttr(`${P}_Updated_At`, 'Updated At', 32),
       ],
     })
   );
@@ -271,17 +301,18 @@ async function main() {
   await ensureTable(
     tableDef({
       schemaName: `${P}_Song`,
+      entitySetName: `${P}_songs`,
       displayName: 'JLS Song',
       collectionName: 'JLS Songs',
       description: 'Per-account synced songs (lyric JSON + metadata)',
       attributes: [
         stringAttr(`${P}_Title`, 'Title', 200, { primary: true }),
-        stringAttr(`${P}_SongId`, 'Song ID', 64, { required: 'ApplicationRequired' }),
+        stringAttr(`${P}_Song_Id`, 'Song ID', 64, { required: 'ApplicationRequired' }),
         stringAttr(`${P}_Artist`, 'Artist', 200),
         stringAttr(`${P}_Badges`, 'Badges JSON', 4000),
-        stringAttr(`${P}_LyricJson`, 'Lyric JSON', MAX_JSON, { format: 'TextArea' }),
-        stringAttr(`${P}_AudioPath`, 'Audio Path', 400),
-        stringAttr(`${P}_UpdatedAt`, 'Updated At', 32),
+        memoAttr(`${P}_Lyric_Json`, 'Lyric JSON', MAX_JSON),
+        stringAttr(`${P}_Audio_Path`, 'Audio Path', 400),
+        stringAttr(`${P}_Updated_At`, 'Updated At', 32),
       ],
     })
   );

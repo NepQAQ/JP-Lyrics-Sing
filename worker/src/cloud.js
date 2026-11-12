@@ -58,7 +58,9 @@ function schema(env) {
       table: `${prefix}_user_data`,
       set: `${prefix}_user_datas`,
       id: `${prefix}_user_dataid`,
-      owner: `${prefix}_owner`,
+      // OData 导航属性名保留 Lookup SchemaName 的大小写（jls_Owner），
+      // 绑定注解大小写敏感；过滤用的结构属性 _jls_owner_value 则是小写。
+      ownerBind: `${prefix}_Owner`,
       ownerValue: `_${prefix}_owner_value`,
       configJson: `${prefix}_config_json`,
       dictionaryJson: `${prefix}_dictionary_json`,
@@ -69,7 +71,7 @@ function schema(env) {
       set: `${prefix}_songs`,
       id: `${prefix}_songid`,
       songId: `${prefix}_song_id`,
-      owner: `${prefix}_owner`,
+      ownerBind: `${prefix}_Owner`,
       ownerValue: `_${prefix}_owner_value`,
       title: `${prefix}_title`,
       artist: `${prefix}_artist`,
@@ -339,7 +341,7 @@ async function handlePutUserData(request, url, env) {
   } else {
     await dvCreate(env, s.userData.table, {
       ...data,
-      [`${s.userData.owner}@odata.bind`]: `/${s.user.set}(${uid})`,
+      [`${s.userData.ownerBind}@odata.bind`]: `/${s.user.set}(${uid})`,
     });
   }
 
@@ -449,7 +451,7 @@ async function handlePutSong(request, url, env, songId) {
   } else {
     await dvCreate(env, s.song.table, {
       ...data,
-      [`${s.song.owner}@odata.bind`]: `/${s.user.set}(${uid})`,
+      [`${s.song.ownerBind}@odata.bind`]: `/${s.user.set}(${uid})`,
     });
   }
 

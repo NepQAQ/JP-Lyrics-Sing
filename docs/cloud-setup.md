@@ -143,9 +143,9 @@ Cloudflare Worker（唯一后端入口，worker/src/）
 |----|------|------|
 | `jls_user_dataid` | GUID（主键） | |
 | `jls_name` | String(100)，主名列 | 仅用于后台展示 |
-| `jls_owner` | Lookup → jls_user | 所属账号（级联删除） |
-| `jls_config_json` | String(1048576) | 前端设置 JSON |
-| `jls_dictionary_json` | String(1048576) | 我的词典 JSON |
+| `jls_owner` | Lookup → jls_user | 所属账号（级联删除）；OData 导航属性名为 `jls_Owner`（保留 SchemaName 大小写），创建行用 `jls_Owner@odata.bind` 绑定，过滤用 `_jls_owner_value` |
+| `jls_config_json` | Memo(1048576) | 前端设置 JSON |
+| `jls_dictionary_json` | Memo(1048576) | 我的词典 JSON |
 | `jls_updated_at` | String(32) | 客户端 epoch 毫秒（LWW 用） |
 
 **jls_song**（实体集 `jls_songs`，每首歌一行）
@@ -155,12 +155,18 @@ Cloudflare Worker（唯一后端入口，worker/src/）
 | `jls_songid` | GUID（主键） | |
 | `jls_title` | String(200)，主名列 | 歌名 |
 | `jls_song_id` | String(64) | 客户端歌曲 ID（与 IndexedDB 一致） |
-| `jls_owner` | Lookup → jls_user | 所属账号（级联删除） |
+| `jls_owner` | Lookup → jls_user | 所属账号（级联删除）；导航属性 `jls_Owner`，绑定 `jls_Owner@odata.bind`，过滤 `_jls_owner_value` |
 | `jls_artist` | String(200) | 歌手 |
 | `jls_badges` | String(4000) | 列表元数据 JSON（时长 / 徽章 / 音频信息） |
-| `jls_lyric_json` | String(1048576) | 整曲歌词 JSON（多行文本列上限即 1048576 字符） |
+| `jls_lyric_json` | Memo(1048576) | 整曲歌词 JSON（多行文本列上限即 1048576 字符） |
 | `jls_audio_path` | String(400) | SharePoint 路径 `Songs/{userId}/{songId}` |
 | `jls_updated_at` | String(32) | 客户端 epoch 毫秒（LWW 用） |
+
+> **命名与大小写注意**：owner 查找列的 OData **导航属性名**保留 Lookup SchemaName 的大小写，
+> 即 `{prefix}_Owner`（如 `jls_Owner`）——创建行必须用 `jls_Owner@odata.bind` 绑定注解
+> （OData 绑定大小写敏感，小写 `jls_owner` 会报 400 "undeclared property"）；
+> 而过滤用的**结构属性** `_jls_owner_value` 是小写。大 JSON 列（config / dictionary / lyric）
+> 必须用 Memo（多行文本）类型：自定义 String 列上限 4000 字符，与格式无关。
 
 ## 4. SharePoint 站点授权
 

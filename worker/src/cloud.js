@@ -161,7 +161,7 @@ async function route(request, url, env, ctx, path) {
 
 async function handleRegister(request, url, env) {
   assertDataverseConfigured(env);
-  assertJwtSecret(env);
+  assertJwtSecret(env?.JWT_SECRET);
 
   const ip = clientIp(request);
   const limit = registerLimiter.check(`register|${ip}`);
@@ -211,7 +211,7 @@ async function handleRegister(request, url, env) {
 
 async function handleLogin(request, url, env) {
   assertDataverseConfigured(env);
-  assertJwtSecret(env);
+  assertJwtSecret(env?.JWT_SECRET);
 
   const body = await readJsonBody(request, MAX_JSON_BYTES);
   const username = String(body?.username || '').trim();

@@ -33,7 +33,25 @@
   // 未指定环境（dev 项目）仍走顶层配置，两者互不影响
   "env": {
     "production": {
-      "name": "jp-lyrics-sing"
+      "name": "jp-lyrics-sing",
+      // 注意：wrangler 的 vars 不跨环境继承——`wrangler deploy -e production` 只读本块，
+      // 顶层 vars 对生产部署完全不生效，因此这里必须维护一份与顶层完全同值的 vars；
+      // 修改任意一处时必须同步另一处（含 ALLOWED_ORIGINS）
+      "vars": {
+        "ALLOWED_ORIGINS": "https://nepqaq.github.io,http://localhost:8765,http://127.0.0.1:8765",
+        // 云同步 Dataverse 连接（非机密，可提交；机密 DATAVERSE_CLIENT_SECRET / JWT_SECRET
+        // 是 Worker 级 Secret、部署保留，由用户在 Cloudflare 面板手动添加，不要写进本文件）
+        "DATAVERSE_TENANT_ID": "87508ff1-2b8b-4b0e-96cd-f9277fe47cac",
+        "DATAVERSE_ENV_URL": "https://org12aa2f34.api.crm5.dynamics.com",
+        "DATAVERSE_CLIENT_ID": "7b6dfd26-3ce6-48b1-8ba5-6ed8f2faa974",
+        // 免费版 Workers 每请求约 10ms CPU，默认 100000 迭代可能触发 1102；
+        // 行内 jls_iterations 列保证存量账号按注册时的迭代数验证
+        "PBKDF2_ITERATIONS": "10000",
+        // 音频云端存储（SharePoint/OneDrive 文档库，非机密资源标识符，可提交）：
+        // 站点 ID 为 Graph 复合格式「host,siteGuid,webGuid」（含逗号）；未配置时音频仅本地，歌词/配置仍同步
+        "SHAREPOINT_SITE_ID": "mhy123-my.sharepoint.com,1e59acd3-b927-4d9b-8458-8af151af5230,7d5b26e6-06a2-4ccb-a79f-d3c5ad8dd98e",
+        "SHAREPOINT_DRIVE_ID": "b!06xZHie5m02EWIrxUa9SMOYmW32iBstMp5_Txa2N2Y5ZXvNUdV8URrWZoP8_AjKo"
+      }
     }
   }
 }

@@ -5,6 +5,7 @@
 // 接口签名与衍生版 jp-lyrics-studio 的 server/app.py 保持一致，前端模块无需感知存储差异。
 import { cleanLine } from './state.js';
 import { sleep, downloadText, bus } from './util.js';
+import { buildVocab } from './vocab-core.js';
 
 // =============================================================== 常量
 const SETTINGS_KEY = 'jls-settings';
@@ -34,6 +35,7 @@ const DEFAULT_SETTINGS = {
   autoWordTiming: true,     // 打开没有逐字时间轴的歌曲时自动获取
   cloudSync: true,          // 登录后启用云同步（本地变更防抖推送）
   songOrder: [],            // 曲库手动排序（歌曲 id 列表；随设置云同步）
+  vocabNotes: {},           // 单词本笔记（按词面：{meaning, source, note, starred}；随设置云同步）
 };
 
 const SONG_FIELDS = new Set(['title', 'artist', 'album', 'offset', 'timeline', 'duration', 'syncInfo']);
@@ -506,6 +508,46 @@ async function setOrder(ids) {
   return songs();
 }
 
+// =============================================================== 单词本（纯客户端整理，笔记随设置云同步）
+
+/** 整理单词：songId 省略或 'all' 时覆盖全部歌曲。释义 / 收藏笔记按词面合并（跨歌曲共享）。 */
+async function vocab(songId) {
+  const rows = await idbGetAll('songs');
+  const order = readSettings().songOrder;
+  const pos = new Map((order || []).map((id, i) => [id, i]));
+  const target = String(songId || '');
+  const list = rows
+    .filter((s) => !target || target === 'all' || s.id === target)
+    .sort((a, b) => (pos.get(a.id) ?? 1e12) - (pos.get(b.id) ?? 1e12) || (b.updatedAt || 0) - (a.updatedAt || 0));
+  const songsIn = list.map((s) => ({
+    id: s.id,
+    title: s.title,
+    lines: (s.lines || []).map(cleanLine),
+  }));
+  const entries = buildVocab(songsIn, readSettings().vocabNotes || {});
+  return { entries };
+}
+
+/** 保存单词笔记（释义 / 收藏等）。items: [{surface, kana?, meaning?, source?, note?, starred?}]，按词面合并进设置。 */
+async function saveVocabNotes(items) {
+  const notes = { ...(readSettings().vocabNotes || {}) };
+  for (const it of items || []) {
+    const key = String(it?.surface || '').trim();
+    if (!key) continue;
+    const old = notes[key] || {};
+    const next = {
+      kana: it.kana !== undefined ? String(it.kana || '') : (old.kana || ''),
+      meaning: it.meaning !== undefined ? String(it.meaning || '') : (old.meaning || ''),
+      source: it.source !== undefined ? String(it.source || '') : (old.source || ''),
+      note: it.note !== undefined ? String(it.note || '') : (old.note || ''),
+      starred: it.starred !== undefined ? !!it.starred : !!old.starred,
+    };
+    notes[key] = next;
+  }
+  await saveSettings({ vocabNotes: notes });
+  return { ok: true };
+}
+
 async function song(id) {
   const s = await idbGet('songs', id);
   if (!s) throw new Error(`未找到：${id}`);
@@ -654,6 +696,26 @@ async function deleteAudio(id) {
     t.objectStore('audio').delete(id);
     songRec.audio = null;
   });
+}
+
+/** 本设备音频索引（不含 Blob）：[{songId, size, mime, name}]，曲库缓存徽章用。 */
+async function audioIndex() {
+  const rows = await idbGetAll('audio');
+  return rows.map((r) => ({ songId: r.songId, size: r.size || (r.blob && r.blob.size) || 0, mime: r.mime || '', name: r.name || '' }));
+}
+
+/** 仅删除本设备的音频 Blob（不动歌曲记录——云用户的「清除本设备缓存」，下次同步可重新下载）。 */
+async function removeAudioBlob(id) {
+  const db = await openDB();
+  await new Promise((resolve, reject) => {
+    const t = db.transaction('audio', 'readwrite');
+    t.objectStore('audio').delete(id);
+    t.oncomplete = resolve;
+    t.onerror = () => reject(t.error || new Error('IndexedDB 写入失败'));
+    t.onabort = () => reject(t.error || new Error('IndexedDB 事务中止'));
+  });
+  revokeAudioUrl(id);
+  return { ok: true };
 }
 
 const audioUrlCache = new Map(); // songId → { bust, url }
@@ -1292,6 +1354,8 @@ export const api = {
 
   songs,
   setOrder,
+  vocab,
+  saveVocabNotes,
   song,
   createSong,
   importSong,
@@ -1300,6 +1364,8 @@ export const api = {
   uploadAudio,
   deleteAudio,
   audioUrl,
+  audioIndex,
+  removeAudioBlob,
 
   // 云同步底层（cloud.js 使用；不触发 local:dirty）
   rawSongs,

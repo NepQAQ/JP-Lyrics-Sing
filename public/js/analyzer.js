@@ -287,3 +287,20 @@ export async function readingFor(surface) {
   const r = words.filter(w => !w.p).map(w => w.r).filter(Boolean).join(' ');
   return { k, r };
 }
+
+
+/** 动词 / 形容词的原形（辞书形），用于单词本：触った → {base: '触る', baseKana: 'さわる'}；不是活用词或已是原形时返回 null。需要分词器已加载。 */
+export function baseFormOf(surface) {
+  if (!tokenizer || !surface) return null;
+  const toks = tokenizer.tokenize(surface);
+  const i = toks.findIndex(t => ['動詞', '形容詞'].includes(t.pos) && t.pos_detail_1 !== '非自立');
+  if (i < 0) return null;
+  const tk = toks[i];
+  if (!tk.basic_form || tk.basic_form === '*' || (tk.basic_form === tk.surface_form && i === toks.length - 1)) return null;
+  const prefix = toks.slice(0, i);
+  const base = prefix.map(t => t.surface_form).join('') + tk.basic_form;
+  if (base === surface) return null;
+  const baseToks = tokenizer.tokenize(tk.basic_form);
+  const kana = prefix.map(t => tokenKana(t)).join('') + baseToks.map(t => tokenKana(t)).join('');
+  return { base, baseKana: kana };
+}

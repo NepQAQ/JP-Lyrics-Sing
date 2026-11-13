@@ -28,6 +28,7 @@
   <nav class="seg app-tabs" aria-label="模式">
     <button type="button" data-app="lyrics" class="active">歌词</button>
     <button type="button" data-app="study">学习</button>
+    <button type="button" data-app="vocab">单词本</button>
   </nav>
 
   <div class="top-actions">
@@ -126,6 +127,7 @@
   <button type="button" data-cmd="search" class="show-sm">联网搜索歌词</button>
   <button type="button" data-cmd="import" class="show-sm">导入本地歌曲</button>
   <button type="button" data-app="study" class="show-sm">切换到「学习」模式</button>
+  <button type="button" data-app="vocab" class="show-sm">打开「单词本」</button>
   <button type="button" data-app="lyrics" class="show-sm">切换到「歌词」模式</button>
   <div class="menu-sep show-sm"></div>
   <button type="button" data-cmd="info">歌曲信息 / 更换音频</button>
@@ -184,6 +186,27 @@
         <div id="study-status" class="status-line"></div>
       </div>
       <div id="study-results" class="study-results"></div>
+    </section>
+
+    <section id="vocab" class="vocab" aria-label="单词本">
+      <div class="vb-toolbar">
+        <select id="vb-scope" class="input select" aria-label="范围">
+          <option value="song">当前歌曲</option>
+          <option value="all">全部歌曲</option>
+          <option value="starred">收藏的单词</option>
+        </select>
+        <input id="vb-filter" class="input" type="search" placeholder="搜索：汉字 / 假名 / 罗马音 / 释义" />
+        <select id="vb-sort" class="input select" aria-label="排序">
+          <option value="order">按出现顺序</option>
+          <option value="count">按出现次数</option>
+          <option value="kana">按五十音</option>
+        </select>
+        <button id="vb-translate" class="btn" type="button" title="用机器翻译补全没有释义的单词（手动填写的不会被覆盖）">补全释义</button>
+        <button id="vb-refresh" class="btn ghost" type="button" title="重新整理（歌词编辑后会自动跟随）">刷新</button>
+        <button id="vb-export" class="btn ghost" type="button">导出 CSV</button>
+      </div>
+      <div class="vb-meta"><span id="vb-count" class="muted small"></span><span id="vb-status" class="muted small"></span></div>
+      <div id="vb-list" class="vb-list"></div>
     </section>
   </main>
 </div>

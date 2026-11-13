@@ -13,6 +13,7 @@ import { initSong, openSong, updateSongHeader, translateMissing, analyzeSong, fe
 import { initLibrary, refreshLibrary, openImport, openSongInfo, toggleSidebar } from './library.js';
 import { initSearch, openSearch, openMarumaru } from './search.js';
 import { initStudy, syncStudyVoice } from './study.js';
+import { initVocab, openVocab } from './vocab.js';
 import { initExport, openExport } from './export.js';
 import { speak, stopSpeech } from './tts.js';
 import { lineStart, LINE_PREROLL } from './timing.js';
@@ -195,13 +196,14 @@ function initKeyboard() {
   });
 }
 
-// ---------------------------------------------------------------- 应用模式（歌词 / 学习）
+// ---------------------------------------------------------------- 应用模式（歌词 / 学习 / 单词本）
 function setAppMode(mode) {
   $$('.popover').forEach(p => { p.hidden = true; });
   state.appMode = mode;
   document.body.dataset.app = mode;
   $$('button[data-app]').forEach(b => b.classList.toggle('active', b.dataset.app === mode));
   if (mode === 'study') { stopSpeech(); ensureTokenizer().catch(() => {}); }
+  if (mode === 'vocab') openVocab().catch(() => {});
 }
 
 // ---------------------------------------------------------------- 云同步 UI
@@ -244,6 +246,7 @@ async function boot() {
   initLibrary();
   initSearch();
   initStudy();
+  initVocab();
   initExport();
   initLyricsInteractions();
   initKeyboard();
@@ -264,6 +267,8 @@ async function boot() {
   });
   $('#btn-edit-mode').addEventListener('click', () => setEditing(!state.editing));
   $$('button[data-app]').forEach(b => b.addEventListener('click', () => setAppMode(b.dataset.app)));
+  bus.on('app:mode', (mode) => setAppMode(mode));          // 单词本例句跳转等模块间切换
+  bus.on('song:open', (id) => { if (id) openSong(id).catch(() => {}); });
 
   bus.on('song:closed', () => { renderSong(); updateSongHeader(); });
 

@@ -147,7 +147,7 @@ textarea.input { resize: vertical; line-height: 1.6; }
 .badge.edit { color: var(--accent); }
 
 /* 分段按钮 */
-.seg { display: inline-flex; padding: 2px; border-radius: 9px; background: var(--surface-2); gap: 2px; }
+.seg { display: inline-flex; padding: 2px; border-radius: 9px; background: var(--surface-2); gap: 2px; white-space: nowrap; }
 .seg > button, .seg > label > span {
   display: inline-block; padding: 4px 12px; border: 0; border-radius: 7px; background: transparent; cursor: pointer;
   color: var(--text-2); font-size: 13px; white-space: nowrap;
@@ -394,11 +394,11 @@ body[data-app="study"] .study { display: block; }
 .player-seek { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .player-seek input[type=range] { flex: 1; accent-color: var(--accent); min-width: 60px; }
 .time { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted); min-width: 52px; text-align: center; }
-.player-side { display: flex; align-items: center; gap: 12px; }
-.rate { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.player-side { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.rate { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; white-space: nowrap; }
 .rate-label { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 34px; text-align: center; }
 .rate select { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-.offset { display: inline-flex; align-items: center; gap: 3px; }
+.offset { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 .offset input { width: 58px; text-align: center; padding: 3px 6px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
 .status { grid-column: 1 / -1; font-size: 11.5px; color: var(--muted); height: 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .status.error { color: var(--danger); }
@@ -553,10 +553,15 @@ body.editing .spacer.bottom { height: 60vh; }
   .player {
     left: 10px; right: 10px; bottom: var(--player-safe); border-radius: 16px;
     border: 1px solid var(--border); box-shadow: var(--shadow);
-    grid-template-columns: 1fr; grid-template-rows: auto auto auto auto; gap: 4px; padding: 8px 10px 4px;
+    grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto auto; gap: 4px; padding: 8px 10px 4px;
+    height: auto; min-height: 96px;
   }
   .player-main { justify-content: center; }
-  .player-side { justify-content: center; }
+  .player-side { justify-content: center; gap: 6px 10px; }
+  .player .rate { padding: 2px 6px; }
+  .player .offset input { width: 48px; }
+  .player .btn.small { height: 26px; padding: 0 8px; font-size: 12px; }
+  .player .icon-btn.tiny { width: 22px; height: 22px; font-size: 15px; }
   .lyrics { padding: 0 6px; }
   .line { padding: 8px 6px; }
   .jp { font-size: calc(19px * var(--font-scale)); }

@@ -86,6 +86,7 @@ function syncThemeMenu() {
 // ---------------------------------------------------------------- 播放条收起/展开
 function initPlayerBar() {
   const root = document.documentElement;
+  const player = document.querySelector('.player');
   const apply = (collapsed) => root.classList.toggle('player-collapsed', collapsed);
   $('#btn-player-collapse').addEventListener('click', () => {
     localStorage.setItem('jls-player-collapsed', '1');
@@ -95,6 +96,15 @@ function initPlayerBar() {
     localStorage.removeItem('jls-player-collapsed');
     apply(false);
   });
+  // 移动端卡片高度自适应：把实际高度写回 --player-h，保证歌词区/浮层占位一致（桌面保持常量）
+  const mq = window.matchMedia('(max-width: 720px)');
+  const syncHeight = () => {
+    if (mq.matches && player) root.style.setProperty('--player-h', `${player.offsetHeight}px`);
+    else root.style.removeProperty('--player-h');
+  };
+  if (player && 'ResizeObserver' in window) new ResizeObserver(syncHeight).observe(player);
+  if (mq.addEventListener) mq.addEventListener('change', syncHeight);
+  syncHeight();
 }
 
 function togglePopover(sel, anchorSel) {

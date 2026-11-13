@@ -67,12 +67,27 @@ export function toast(msg, { error = false, ms = 2600 } = {}) {
   }, ms);
 }
 
-/** 底部状态栏（持续信息，如“正在分析 12/40”） */
+let statusTimer = null;
+
+/** 底部状态栏：完成类提示 3 秒后淡出清空，错误类 8 秒；
+ *  「正在…」、含省略号或 n/m 进度计数的进行中提示不自动隐藏，由流程结束时清空或替换。 */
 export function setStatus(msg, { error = false } = {}) {
   const el = $('#status');
   if (!el) return;
   el.textContent = msg || '';
   el.classList.toggle('error', !!error);
+  el.classList.remove('status-fade');
+  clearTimeout(statusTimer);
+  if (!msg) return;
+  const progress = /^正在/.test(msg) || msg.includes('…') || /\d\/\d/.test(msg);
+  if (progress) return;
+  statusTimer = setTimeout(() => {
+    el.classList.add('status-fade');
+    statusTimer = setTimeout(() => {
+      el.textContent = '';
+      el.classList.remove('status-fade');
+    }, 400);
+  }, error ? 8000 : 3000);
 }
 
 /** 弹层动画：打开淡入、关闭淡出（配合 .popover / .pop-anim 的过渡样式） */

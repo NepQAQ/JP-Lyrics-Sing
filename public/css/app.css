@@ -182,7 +182,7 @@ body[data-app="study"] .lyrics-only, body[data-app="vocab"] .lyrics-only { displ
 .topbar .icon-btn { transition: transform .16s ease, opacity .16s ease, background-color .16s ease, color .16s ease; }
 .topbar .icon-btn:active { transform: scale(.88); opacity: .75; }
 @media (prefers-reduced-motion: reduce) {
-  .popover, .topbar .icon-btn, .player-side { transition: none !important; }
+  .popover, .topbar .icon-btn, .player-side, .status { transition: none !important; }
 }
 .popover.settings { width: 340px; display: grid; gap: 14px; max-height: calc(100vh - var(--top-h) - 24px); overflow-y: auto; }
 .set-group { display: grid; gap: 7px; }
@@ -409,7 +409,8 @@ body[data-app="study"] .study { display: block; }
 .rate select { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .offset { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 .offset input { width: 58px; text-align: center; padding: 3px 6px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
-.status { grid-column: 1 / -1; font-size: 11.5px; color: var(--muted); height: 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.status { grid-column: 1 / -1; font-size: 11.5px; color: var(--muted); height: 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; transition: opacity .4s ease; }
+.status.status-fade { opacity: 0; }
 .status.error { color: var(--danger); }
 body[data-source="timer"] .player .play-btn { background: var(--accent); color: var(--accent-ink); }
 

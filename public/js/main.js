@@ -71,11 +71,29 @@ function initSettingsUI() {
     });
   });
   $('#btn-view').addEventListener('click', () => patchSettings({ viewMode: state.settings.viewMode === 'read' ? 'sing' : 'read' }));
-  $('#btn-theme').addEventListener('click', () => {
-    const order = ['auto', 'light', 'dark'];
-    const next = order[(order.indexOf(state.settings.theme || 'auto') + 1) % 3];
-    patchSettings({ theme: next });
-    toast({ auto: '主题：跟随系统', light: '主题：浅色', dark: '主题：深色' }[next], { ms: 1000 });
+  $('#btn-theme').addEventListener('click', (e) => { e.stopPropagation(); syncThemeMenu(); togglePopover('#theme-menu', '#btn-theme'); });
+  $$('#theme-menu .theme-opt').forEach(btn => btn.addEventListener('click', () => {
+    patchSettings({ theme: btn.dataset.theme });
+    $('#theme-menu').hidden = true;
+  }));
+}
+
+function syncThemeMenu() {
+  const cur = state.settings.theme || 'auto';
+  $$('#theme-menu .theme-opt').forEach(b => b.classList.toggle('active', b.dataset.theme === cur));
+}
+
+// ---------------------------------------------------------------- 播放条收起/展开
+function initPlayerBar() {
+  const root = document.documentElement;
+  const apply = (collapsed) => root.classList.toggle('player-collapsed', collapsed);
+  $('#btn-player-collapse').addEventListener('click', () => {
+    localStorage.setItem('jls-player-collapsed', '1');
+    apply(true);
+  });
+  $('#btn-player-expand').addEventListener('click', () => {
+    localStorage.removeItem('jls-player-collapsed');
+    apply(false);
   });
 }
 
@@ -241,6 +259,7 @@ async function boot() {
   initSettingsUI();
   syncSettingsUI();
   initPlayer();
+  initPlayerBar();
   initEditor();
   initSong();
   initLibrary();

@@ -13,7 +13,7 @@ const DB_NAME = 'jp-lyrics-studio';
 const DB_VERSION = 1;
 
 const DEFAULT_SETTINGS = {
-  theme: 'auto',            // auto | light | dark
+  theme: 'auto',            // auto | light | dark | mint | sand | sakura | sky | lavender
   viewMode: 'sing',         // sing（跟唱，高亮当前句并居中） | read（阅读平铺）
   layout: 'stack',          // stack（原文/罗马音/中文分行） | inline（逐词对照）
   wordStyle: 'box',         // none | box（边框） | tint（交替底色） | underline

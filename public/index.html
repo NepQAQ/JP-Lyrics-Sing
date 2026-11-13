@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Sans+SC:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/app.css" />
+  <script>try{if(localStorage.getItem('jls-player-collapsed')==='1')document.documentElement.classList.add('player-collapsed')}catch(e){}</script>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23111'/><text x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='sans-serif'>歌</text></svg>" />
 </head>
 <body data-app="lyrics" data-source="audio">
@@ -55,11 +56,24 @@
     <button id="btn-more" class="icon-btn" type="button" title="更多" aria-label="更多">
       <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/></svg>
     </button>
-    <button id="btn-theme" class="icon-btn" type="button" title="切换主题" aria-label="切换主题">
+    <button id="btn-theme" class="icon-btn" type="button" title="选择主题" aria-label="选择主题">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>
     </button>
   </div>
 </header>
+
+<!-- 主题选择 -->
+<div id="theme-menu" class="popover menu theme-menu" hidden>
+  <button type="button" class="theme-opt" data-theme="auto"><span class="swatch swatch-auto" aria-hidden="true"></span>跟随系统</button>
+  <button type="button" class="theme-opt" data-theme="light"><span class="swatch" style="--sw:#f7f7f5;--sa:#2f6fed" aria-hidden="true"></span>浅色</button>
+  <button type="button" class="theme-opt" data-theme="dark"><span class="swatch" style="--sw:#161616;--sa:#6b9bff" aria-hidden="true"></span>深色</button>
+  <div class="menu-sep"></div>
+  <button type="button" class="theme-opt" data-theme="mint"><span class="swatch" style="--sw:#e9f4ec;--sa:#178a56" aria-hidden="true"></span>薄荷绿</button>
+  <button type="button" class="theme-opt" data-theme="sand"><span class="swatch" style="--sw:#f7f0e2;--sa:#b0722a" aria-hidden="true"></span>暖沙</button>
+  <button type="button" class="theme-opt" data-theme="sakura"><span class="swatch" style="--sw:#f9edf1;--sa:#c24d72" aria-hidden="true"></span>樱花粉</button>
+  <button type="button" class="theme-opt" data-theme="sky"><span class="swatch" style="--sw:#ebf2f9;--sa:#2b6cb8" aria-hidden="true"></span>天蓝</button>
+  <button type="button" class="theme-opt" data-theme="lavender"><span class="swatch" style="--sw:#f0ecf8;--sa:#6d5ac4" aria-hidden="true"></span>薰衣草</button>
+</div>
 
 <!-- 显示设置 -->
 <div id="settings" class="popover settings" hidden>
@@ -233,6 +247,9 @@
 
 <!-- ============================== 播放条 ============================== -->
 <footer class="player">
+  <button id="btn-player-collapse" class="icon-btn player-collapse" type="button" title="收起播放条" aria-label="收起播放条">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+  </button>
   <div class="player-main">
     <button id="btn-prev" class="icon-btn" type="button" title="上一句（←）" aria-label="上一句">
       <svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM19 5v14L9 12z" fill="currentColor"/></svg>
@@ -274,6 +291,9 @@
   <div id="status" class="status" role="status" aria-live="polite"></div>
   <audio id="audio" preload="auto" playsinline></audio>
 </footer>
+<button id="btn-player-expand" class="player-expand" type="button" title="展开播放条" aria-label="展开播放条">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg>
+</button>
 
 <!-- 单词浮动工具条（编辑模式） -->
 <div id="word-toolbar" class="word-toolbar" hidden>

@@ -1,5 +1,5 @@
 // 入口：加载设置 → 初始化各模块 → 绑定全局交互
-import { $, $$, toast, bus, debounce, isTypingTarget, setStatus } from './util.js';
+import { $, $$, toast, bus, debounce, isTypingTarget, setStatus, showPopover, hidePopover, hideAllPopovers } from './util.js';
 import { state, lineById } from './state.js';
 import { api } from './api.js';
 import { applyDisplayClasses, renderSong, rerenderAllLines } from './render.js';
@@ -67,14 +67,14 @@ function initSettingsUI() {
   $('#btn-more').addEventListener('click', (e) => { e.stopPropagation(); togglePopover('#more-menu', '#btn-more'); });
   document.addEventListener('click', (e) => {
     $$('.popover:not([hidden])').forEach(p => {
-      if (!p.contains(e.target)) p.hidden = true;
+      if (!p.contains(e.target)) hidePopover(p);
     });
   });
   $('#btn-view').addEventListener('click', () => patchSettings({ viewMode: state.settings.viewMode === 'read' ? 'sing' : 'read' }));
   $('#btn-theme').addEventListener('click', (e) => { e.stopPropagation(); syncThemeMenu(); togglePopover('#theme-menu', '#btn-theme'); });
   $$('#theme-menu .theme-opt').forEach(btn => btn.addEventListener('click', () => {
     patchSettings({ theme: btn.dataset.theme });
-    $('#theme-menu').hidden = true;
+    hidePopover($('#theme-menu'));
   }));
 }
 
@@ -87,6 +87,12 @@ function syncThemeMenu() {
 function initPlayerBar() {
   const root = document.documentElement;
   const player = document.querySelector('.player');
+  const main = document.querySelector('.player-main');
+  const side = document.querySelector('.player-side');
+  const rate = document.querySelector('.player .rate');
+  const source = document.querySelector('.player .seg.source');
+  const offset = document.querySelector('.player .offset');
+  const ellipsis = $('#btn-player-ellipsis');
   const apply = (collapsed) => root.classList.toggle('player-collapsed', collapsed);
   $('#btn-player-collapse').addEventListener('click', () => {
     localStorage.setItem('jls-player-collapsed', '1');
@@ -96,23 +102,87 @@ function initPlayerBar() {
     localStorage.removeItem('jls-player-collapsed');
     apply(false);
   });
-  // 移动端卡片高度自适应：把实际高度写回 --player-h，保证歌词区/浮层占位一致（桌面保持常量）
+
+  // 移动端播放行三态：fit=单行（速度/音频在左、偏移在右，播放组严格居中）；
+  // compact=放不下时收起侧组只留省略号；expanded=点省略号展开为多行。桌面完全不受影响。
   const mq = window.matchMedia('(max-width: 720px)');
+  let pmLeft = null;
+  let pmRight = null;
+  const setLayout = (mode) => {
+    if (!player) return;
+    if (mode === 'fit') {
+      if (!pmLeft) {
+        pmLeft = document.createElement('div');
+        pmLeft.className = 'pm-left';
+        pmRight = document.createElement('div');
+        pmRight.className = 'pm-right';
+      }
+      main.prepend(pmLeft);
+      main.append(pmRight);
+      pmLeft.append(rate, source);
+      pmRight.append(offset);
+    } else {
+      if (pmLeft) { pmLeft.remove(); pmRight.remove(); }
+      side.append(rate, source, offset);
+    }
+    player.dataset.mode = mode;
+  };
+  const setDesktop = () => {
+    if (!player) return;
+    delete player.dataset.mode;
+    if (pmLeft) { pmLeft.remove(); pmRight.remove(); }
+    side.append(rate, source, offset);
+  };
+  const updateMode = () => {
+    if (!mq.matches) return setDesktop();
+    if (localStorage.getItem('jls-player-expanded') === '1') return setLayout('expanded');
+    setLayout('fit');
+    const over = (pmLeft && pmLeft.scrollWidth > pmLeft.clientWidth + 1)
+      || (pmRight && pmRight.scrollWidth > pmRight.clientWidth + 1);
+    if (over) setLayout('compact');
+  };
+  ellipsis.addEventListener('click', () => {
+    if (player.dataset.mode === 'expanded') {
+      localStorage.removeItem('jls-player-expanded');
+      ellipsis.title = '展开播放控制';
+      ellipsis.setAttribute('aria-label', '展开播放控制');
+      setLayout('compact');
+    } else {
+      localStorage.setItem('jls-player-expanded', '1');
+      ellipsis.title = '收起播放控制';
+      ellipsis.setAttribute('aria-label', '收起播放控制');
+      setLayout('expanded');
+    }
+  });
+
+  // 移动端卡片高度自适应：把实际高度写回 --player-h，保证歌词区/浮层占位一致（桌面保持常量）
   const syncHeight = () => {
     if (mq.matches && player) root.style.setProperty('--player-h', `${player.offsetHeight}px`);
     else root.style.removeProperty('--player-h');
   };
-  if (player && 'ResizeObserver' in window) new ResizeObserver(syncHeight).observe(player);
-  if (mq.addEventListener) mq.addEventListener('change', syncHeight);
+  let lastW = 0;
+  let modeTimer = 0;
+  const onPlayerResize = () => {
+    syncHeight();
+    const w = player ? player.clientWidth : 0;
+    if (w !== lastW) {
+      lastW = w;
+      clearTimeout(modeTimer);
+      modeTimer = setTimeout(updateMode, 120);
+    }
+  };
+  if (player && 'ResizeObserver' in window) new ResizeObserver(onPlayerResize).observe(player);
+  if (mq.addEventListener) mq.addEventListener('change', () => { lastW = 0; updateMode(); syncHeight(); });
+  updateMode();
   syncHeight();
 }
 
 function togglePopover(sel, anchorSel) {
   const pop = $(sel);
   const willOpen = pop.hidden;
-  $$('.popover').forEach(p => { p.hidden = true; });
-  if (!willOpen) return;
-  pop.hidden = false;
+  hideAllPopovers(willOpen ? pop : null);
+  if (!willOpen) { hidePopover(pop); return; }
+  showPopover(pop);
   const a = $(anchorSel).getBoundingClientRect();
   const w = pop.offsetWidth;
   pop.style.top = `${a.bottom + 6}px`;
@@ -174,7 +244,7 @@ function initLyricsInteractions() {
 
 // ---------------------------------------------------------------- 命令
 function runCommand(cmd) {
-  $$('.popover').forEach(p => { p.hidden = true; });
+  hideAllPopovers();
   switch (cmd) {
     case 'import': return openImport([], { pick: true });
     case 'search': return openSearch({});
@@ -226,7 +296,7 @@ function initKeyboard() {
 
 // ---------------------------------------------------------------- 应用模式（歌词 / 学习 / 单词本）
 function setAppMode(mode) {
-  $$('.popover').forEach(p => { p.hidden = true; });
+  hideAllPopovers();
   state.appMode = mode;
   document.body.dataset.app = mode;
   $$('button[data-app]').forEach(b => b.classList.toggle('active', b.dataset.app === mode));

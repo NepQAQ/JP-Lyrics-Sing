@@ -75,6 +75,31 @@ export function setStatus(msg, { error = false } = {}) {
   el.classList.toggle('error', !!error);
 }
 
+/** 弹层动画：打开淡入、关闭淡出（配合 .popover / .pop-anim 的过渡样式） */
+export function showPopover(pop) {
+  if (!pop) return;
+  clearTimeout(pop._hideT);
+  pop.hidden = false;
+  pop.classList.add('pop-anim');
+  void pop.offsetWidth; // 强制回流，让过渡从起始态开始
+  pop.classList.remove('pop-anim');
+}
+
+export function hidePopover(pop) {
+  if (!pop) return;
+  if (pop.hidden) { pop.classList.remove('pop-anim'); return; }
+  clearTimeout(pop._hideT);
+  pop.classList.add('pop-anim');
+  pop._hideT = setTimeout(() => {
+    pop.hidden = true;
+    pop.classList.remove('pop-anim');
+  }, 170);
+}
+
+export function hideAllPopovers(except) {
+  $$('.popover').forEach(p => { if (p !== except) hidePopover(p); });
+}
+
 // 极简事件总线：模块之间解耦
 const listeners = new Map();
 export const bus = {

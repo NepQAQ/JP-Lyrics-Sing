@@ -176,6 +176,13 @@ body[data-app="study"] .lyrics-only, body[data-app="vocab"] .lyrics-only { displ
 .popover {
   position: fixed; z-index: 60; background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
   box-shadow: var(--shadow); padding: 12px;
+  transition: opacity .17s ease, transform .17s ease;
+}
+.popover.pop-anim { opacity: 0; transform: translateY(-6px) scale(.985); }
+.topbar .icon-btn { transition: transform .16s ease, opacity .16s ease, background-color .16s ease, color .16s ease; }
+.topbar .icon-btn:active { transform: scale(.88); opacity: .75; }
+@media (prefers-reduced-motion: reduce) {
+  .popover, .topbar .icon-btn, .player-side { transition: none !important; }
 }
 .popover.settings { width: 340px; display: grid; gap: 14px; max-height: calc(100vh - var(--top-h) - 24px); overflow-y: auto; }
 .set-group { display: grid; gap: 7px; }
@@ -373,6 +380,8 @@ body[data-app="study"] .study { display: block; }
 .player-collapse { position: absolute; top: 0; right: 4px; width: 26px; height: 22px; opacity: .55; }
 .player-collapse:hover { opacity: 1; }
 .player-collapse svg { width: 14px; height: 14px; }
+.player-ellipsis { display: none; }
+.player-ellipsis svg { width: 20px; height: 20px; }
 :root.player-collapsed .player { transform: translateY(calc(100% + var(--player-safe) + 14px)); pointer-events: none; }
 .player-expand {
   position: fixed; right: 14px; bottom: calc(var(--player-safe) + 12px); z-index: 45;
@@ -557,7 +566,20 @@ body.editing .spacer.bottom { height: 60vh; }
     height: auto; min-height: 96px;
   }
   .player-main { justify-content: center; }
-  .player-side { justify-content: center; gap: 6px 10px; }
+  .player-main > button { flex: 0 0 auto; }
+  /* 播放行三态：fit=左右组夹居中播放组；compact(默认)=省略号+播放组；expanded=多行显示全部控制 */
+  .pm-left, .pm-right { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 6px; }
+  .pm-left { justify-content: flex-start; }
+  .pm-right { justify-content: flex-end; }
+  .player[data-mode="fit"] .player-main::before { content: ''; flex: 0 0 34px; }
+  .player-ellipsis { display: inline-grid; }
+  .player[data-mode="fit"] .player-ellipsis { display: none; }
+  .player-side {
+    justify-content: center; gap: 6px 10px; overflow: hidden; max-height: 0; opacity: 0;
+    transition: max-height .24s ease, opacity .18s ease;
+  }
+  .player[data-mode="fit"] .player-side { display: none; }
+  .player[data-mode="expanded"] .player-side { max-height: 120px; opacity: 1; }
   .player .rate { padding: 2px 6px; }
   .player .offset input { width: 48px; }
   .player .btn.small { height: 26px; padding: 0 8px; font-size: 12px; }

@@ -1,7 +1,7 @@
 // 自建账号：注册 / 登录 / 登出与会话管理。
 // 令牌存 localStorage（JWT，30 天有效），会话状态经 bus 'auth:changed' 广播。
 // 云端未配置或未登录时本模块完全静默，游客模式零影响。
-import { $, bus, toast } from './util.js';
+import { $, bus, toast, showPopover, hidePopover, hideAllPopovers } from './util.js';
 import { proxyBase } from './api.js';
 
 const AUTH_KEY = 'jls-auth';
@@ -169,11 +169,9 @@ function toggleAccountMenu() {
   const menu = $('#account-menu');
   if (!menu) return;
   const willOpen = menu.hidden;
-  document.querySelectorAll('.popover:not([hidden])').forEach((p) => {
-    p.hidden = true;
-  });
-  if (!willOpen) return;
-  menu.hidden = false;
+  hideAllPopovers(willOpen ? menu : null);
+  if (!willOpen) { hidePopover(menu); return; }
+  showPopover(menu);
   const anchor = $('#btn-account').getBoundingClientRect();
   const w = menu.offsetWidth;
   menu.style.top = `${anchor.bottom + 6}px`;
@@ -181,8 +179,7 @@ function toggleAccountMenu() {
 }
 
 function hideAccountMenu() {
-  const menu = $('#account-menu');
-  if (menu) menu.hidden = true;
+  hidePopover($('#account-menu'));
 }
 
 function openAuthDialog() {

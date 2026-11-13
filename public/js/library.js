@@ -19,10 +19,12 @@ export async function refreshLibrary() {
 }
 
 function renderLibrary() {
+  if (drag) return; // 拖动中不重建列表
   const q = $('#lib-filter').value.trim().toLowerCase();
   const list = $('#lib-list');
   const items = state.songs.filter(s => !q || `${s.title} ${s.artist} ${s.album}`.toLowerCase().includes(q));
   $('#lib-count').textContent = String(state.songs.length);
+  list.classList.toggle('filtering', !!q);
   if (!items.length) {
     list.replaceChildren(h('div', { class: 'lib-empty muted', text: state.songs.length ? '没有匹配的歌曲' : '曲库为空。导入本地歌曲或联网搜索歌词后会保存在这里。' }));
     return;
@@ -47,13 +49,15 @@ function renderLibrary() {
              </div>
              <button class="icon-btn tiny lib-del" type="button" aria-label="从曲库删除" title="从曲库删除">×</button>`,
     });
+    const handle = h('span', { class: 'drag-handle', title: q ? '筛选时不能排序' : '拖动排序（登录云同步后所有设备一致）', 'aria-label': '拖动排序', html: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>' });
+    item.prepend(handle);
     const open = async () => {
       await openSong(s.id);
       renderLibrary();
       if (window.matchMedia('(max-width: 900px)').matches) toggleSidebar(false);
     };
     item.addEventListener('click', (e) => {
-      if (e.target.closest('.lib-del')) return; // 删除按钮由自己的处理器接管
+      if (e.target.closest('.lib-del, .drag-handle')) return; // 删除 / 拖拽手柄由自己的处理器接管
       open().catch(() => {});
     });
     item.addEventListener('keydown', (e) => {
@@ -66,8 +70,62 @@ function renderLibrary() {
       e.stopPropagation(); // 防误触打开歌曲
       deleteLibrarySong(s).catch(() => {});
     });
+    handle.addEventListener('pointerdown', (e) => startDrag(e, item));
     return item;
   }));
+}
+
+// ---------------------------------------------------------------- 拖拽排序（鼠标 / 触屏通用，Pointer Events）
+let drag = null;
+
+function startDrag(e, item) {
+  if ($('#lib-filter').value.trim()) { toast('请先清空筛选再拖动排序'); return; }
+  e.preventDefault();
+  const list = $('#lib-list');
+  const rect = item.getBoundingClientRect();
+  drag = { item, list, offsetY: e.clientY - rect.top, startOrder: [...list.querySelectorAll('.lib-item')].map(el => el.dataset.id), pointerId: e.pointerId };
+  item.classList.add('dragging');
+  item.style.setProperty('--drag-y', '0px');
+  e.target.setPointerCapture?.(e.pointerId);
+  document.addEventListener('pointermove', onDragMove);
+  document.addEventListener('pointerup', endDrag, { once: true });
+  document.addEventListener('pointercancel', endDrag, { once: true });
+}
+
+function onDragMove(e) {
+  if (!drag) return;
+  const { item, list } = drag;
+  const others = [...list.querySelectorAll('.lib-item:not(.dragging)')];
+  let before = null;
+  for (const el of others) {
+    const r = el.getBoundingClientRect();
+    if (e.clientY < r.top + r.height / 2) { before = el; break; }
+  }
+  if (before) { if (item.nextElementSibling !== before) list.insertBefore(item, before); }
+  else if (list.lastElementChild !== item) list.appendChild(item);
+  // 靠近边缘时自动滚动
+  const lr = list.getBoundingClientRect();
+  if (e.clientY < lr.top + 30) list.scrollTop -= 12;
+  else if (e.clientY > lr.bottom - 30) list.scrollTop += 12;
+}
+
+async function endDrag() {
+  document.removeEventListener('pointermove', onDragMove);
+  if (!drag) return;
+  const { item, list, startOrder } = drag;
+  drag = null;
+  item.classList.remove('dragging');
+  const ids = [...list.querySelectorAll('.lib-item')].map(el => el.dataset.id);
+  if (ids.join() === startOrder.join()) return;
+  const byId = new Map(state.songs.map(s => [s.id, s]));
+  state.songs = ids.map(id => byId.get(id)).filter(Boolean);
+  try {
+    state.songs = await api.setOrder(ids);
+    toast('顺序已保存', { ms: 1400 });
+  } catch (err) {
+    toast('排序保存失败：' + err.message, { error: true });
+  }
+  renderLibrary();
 }
 
 /** 侧栏曲库删除：确认后删本地（云清理经 local:dirty song-delete 自动推送）。 */
@@ -446,6 +504,16 @@ export function initLibrary() {
   });
   $('#si-cancel').addEventListener('click', () => $('#dlg-info').close());
   bus.on('song:opened', refreshLibrary);
+  // 其它设备可能改了曲库（新增 / 排序）：回到本页面时刷新
+  let lastRefresh = Date.now();
+  const maybeRefresh = () => {
+    if (document.visibilityState !== 'visible' || Date.now() - lastRefresh < 5000 || drag) return;
+    lastRefresh = Date.now();
+    refreshLibrary();
+  };
+  window.addEventListener('focus', maybeRefresh);
+  document.addEventListener('visibilitychange', maybeRefresh);
+  setInterval(maybeRefresh, 30000);
   bus.on('library:refresh', refreshLibrary);
   bus.on('audio:replace', replaceAudio);
 }

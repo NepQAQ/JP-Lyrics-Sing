@@ -530,3 +530,12 @@ body.editing .spacer.bottom { height: 60vh; }
 .auth-tabs > button { flex: 1; }
 .auth-form { display: grid; gap: 12px; }
 .auth-error { margin: 0; color: var(--danger); font-size: 13px; }
+
+/* ---------------------------------------------------------------- 曲库拖拽排序 */
+.drag-handle { flex: none; width: 18px; height: 34px; display: grid; place-items: center; color: var(--muted); cursor: grab; opacity: .35; touch-action: none; border-radius: 5px; }
+.drag-handle svg { width: 14px; height: 14px; }
+.lib-item:hover .drag-handle { opacity: .9; }
+.drag-handle:hover { background: var(--surface-2); }
+.lib-list.filtering .drag-handle { cursor: not-allowed; opacity: .15; }
+.lib-item.dragging { background: var(--surface); box-shadow: var(--shadow); position: relative; z-index: 2; opacity: .95; }
+.lib-item.dragging .drag-handle { cursor: grabbing; opacity: 1; }

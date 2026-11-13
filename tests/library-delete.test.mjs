@@ -35,6 +35,9 @@ class FakeEl {
   append(...nodes) {
     for (const n of nodes) if (n && n.tagName) { n.parent = this; this.children.push(n); }
   }
+  prepend(...nodes) {
+    for (const n of nodes) if (n && n.tagName) { n.parent = this; this.children.unshift(n); }
+  }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
   querySelector(sel) {
     if (sel === '.lib-del' && !this._libDel) {
@@ -47,10 +50,10 @@ class FakeEl {
     return this._libDel || null;
   }
   closest(sel) {
-    const cls = sel.startsWith('.') ? sel.slice(1) : null;
+    const classes = String(sel).split(',').map((s) => s.trim()).filter((s) => s.startsWith('.')).map((s) => s.slice(1));
     let el = this;
     while (el) {
-      if (cls && String(el.className || '').split(/\s+/).includes(cls)) return el;
+      if (classes.some((cls) => String(el.className || '').split(/\s+/).includes(cls))) return el;
       el = el.parent;
     }
     return null;

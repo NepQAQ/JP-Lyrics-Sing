@@ -33,6 +33,7 @@ const DEFAULT_SETTINGS = {
   segTrim: 0.2,             // 单句播放在下一句开始前提前结束（秒）
   autoWordTiming: true,     // 打开没有逐字时间轴的歌曲时自动获取
   cloudSync: true,          // 登录后启用云同步（本地变更防抖推送）
+  songOrder: [],            // 曲库手动排序（歌曲 id 列表；随设置云同步）
 };
 
 const SONG_FIELDS = new Set(['title', 'artist', 'album', 'offset', 'timeline', 'duration', 'syncInfo']);
@@ -464,6 +465,19 @@ async function saveSong(song, opts = {}) {
   return song;
 }
 
+/**
+ * 按手动排序整理曲库列表：order 里的按序在前，不在 order 里的新歌按最近打开置顶，
+ * order 为空时退回「最近打开优先」。
+ */
+export function sortSongsByOrder(songs, order) {
+  const pos = new Map((order || []).map((id, i) => [id, i]));
+  const recency = (s) => s.lastOpenedAt || s.updatedAt || 0;
+  const known = songs.filter((s) => pos.has(s.id)).sort((a, b) => pos.get(a.id) - pos.get(b.id));
+  const fresh = songs.filter((s) => !pos.has(s.id)).sort((a, b) => recency(b) - recency(a));
+  if (!order || !order.length) return songs.slice().sort((a, b) => recency(b) - recency(a));
+  return [...fresh, ...known];
+}
+
 async function songs() {
   const rows = await idbGetAll('songs');
   const out = rows.map((s) => ({
@@ -481,8 +495,15 @@ async function songs() {
     updatedAt: s.updatedAt,
     lastOpenedAt: s.lastOpenedAt,
   }));
-  out.sort((a, b) => (b.lastOpenedAt || b.updatedAt || 0) - (a.lastOpenedAt || a.updatedAt || 0));
-  return out;
+  return sortSongsByOrder(out, readSettings().songOrder);
+}
+
+/** 保存曲库手动排序（存进设置，随云同步传播），返回排序后的列表。 */
+async function setOrder(ids) {
+  const known = new Set((await idbGetAll('songs')).map((s) => s.id));
+  const order = (ids || []).filter((id) => known.has(id));
+  await saveSettings({ songOrder: order });
+  return songs();
 }
 
 async function song(id) {
@@ -1270,6 +1291,7 @@ export const api = {
   saveDictionary,
 
   songs,
+  setOrder,
   song,
   createSong,
   importSong,

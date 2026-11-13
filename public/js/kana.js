@@ -189,3 +189,121 @@ export function rubyHTML(surface, reading, script = 'hiragana', esc = (s) => s) 
     return `<ruby>${esc(seg.b)}<rt>${esc(rt)}</rt></ruby>`;
   }).join('');
 }
+
+// ---------------------------------------------------------------- 罗马音 → 假名（不需要日语输入法）
+// 规则与常见日语输入法一致：ka→か、shi/si→し、tsu/tu→つ、kka→っか、nn / n' / n+辅音→ん、xa/la→ぁ、- → ー
+const R2K = {
+  a: 'あ', i: 'い', u: 'う', e: 'え', o: 'お',
+  ka: 'か', ki: 'き', ku: 'く', ke: 'け', ko: 'こ', ca: 'か', cu: 'く', co: 'こ', qa: 'くぁ', qi: 'くぃ', qe: 'くぇ', qo: 'くぉ',
+  ga: 'が', gi: 'ぎ', gu: 'ぐ', ge: 'げ', go: 'ご',
+  sa: 'さ', si: 'し', shi: 'し', su: 'す', se: 'せ', so: 'そ',
+  za: 'ざ', zi: 'じ', ji: 'じ', zu: 'ず', ze: 'ぜ', zo: 'ぞ',
+  ta: 'た', ti: 'ち', chi: 'ち', tu: 'つ', tsu: 'つ', te: 'て', to: 'と',
+  da: 'だ', di: 'ぢ', du: 'づ', de: 'で', do: 'ど',
+  na: 'な', ni: 'に', nu: 'ぬ', ne: 'ね', no: 'の',
+  ha: 'は', hi: 'ひ', hu: 'ふ', fu: 'ふ', he: 'へ', ho: 'ほ',
+  ba: 'ば', bi: 'び', bu: 'ぶ', be: 'べ', bo: 'ぼ',
+  pa: 'ぱ', pi: 'ぴ', pu: 'ぷ', pe: 'ぺ', po: 'ぽ',
+  ma: 'ま', mi: 'み', mu: 'む', me: 'め', mo: 'も',
+  ya: 'や', yu: 'ゆ', ye: 'いぇ', yo: 'よ',
+  ra: 'ら', ri: 'り', ru: 'る', re: 'れ', ro: 'ろ', la: 'ら', li: 'り', lu: 'る', le: 'れ', lo: 'ろ',
+  wa: 'わ', wi: 'うぃ', we: 'うぇ', wo: 'を', wu: 'う',
+  va: 'ゔぁ', vi: 'ゔぃ', vu: 'ゔ', ve: 'ゔぇ', vo: 'ゔぉ',
+  fa: 'ふぁ', fi: 'ふぃ', fe: 'ふぇ', fo: 'ふぉ', fyu: 'ふゅ',
+  kya: 'きゃ', kyu: 'きゅ', kyo: 'きょ', gya: 'ぎゃ', gyu: 'ぎゅ', gyo: 'ぎょ',
+  sha: 'しゃ', shu: 'しゅ', she: 'しぇ', sho: 'しょ', sya: 'しゃ', syu: 'しゅ', sye: 'しぇ', syo: 'しょ',
+  ja: 'じゃ', ju: 'じゅ', je: 'じぇ', jo: 'じょ', jya: 'じゃ', jyu: 'じゅ', jyo: 'じょ', zya: 'じゃ', zyu: 'じゅ', zyo: 'じょ',
+  cha: 'ちゃ', chu: 'ちゅ', che: 'ちぇ', cho: 'ちょ', cya: 'ちゃ', cyu: 'ちゅ', cyo: 'ちょ', tya: 'ちゃ', tyu: 'ちゅ', tyo: 'ちょ',
+  dya: 'ぢゃ', dyu: 'ぢゅ', dyo: 'ぢょ', thi: 'てぃ', thu: 'てゅ', dhi: 'でぃ', dhu: 'でゅ', twu: 'とぅ', dwu: 'どぅ', tsa: 'つぁ',
+  nya: 'にゃ', nyu: 'にゅ', nyo: 'にょ', hya: 'ひゃ', hyu: 'ひゅ', hyo: 'ひょ',
+  bya: 'びゃ', byu: 'びゅ', byo: 'びょ', pya: 'ぴゃ', pyu: 'ぴゅ', pyo: 'ぴょ',
+  mya: 'みゃ', myu: 'みゅ', myo: 'みょ', rya: 'りゃ', ryu: 'りゅ', ryo: 'りょ',
+  xa: 'ぁ', xi: 'ぃ', xu: 'ぅ', xe: 'ぇ', xo: 'ぉ', xya: 'ゃ', xyu: 'ゅ', xyo: 'ょ', xtu: 'っ', xtsu: 'っ', xwa: 'ゎ',
+  ltu: 'っ', ltsu: 'っ', lya: 'ゃ', lyu: 'ゅ', lyo: 'ょ',
+  '-': 'ー',
+};
+const MACRON = { 'ā': 'aa', 'ī': 'ii', 'ū': 'uu', 'ē': 'ee', 'ō': 'ou', 'â': 'aa', 'î': 'ii', 'û': 'uu', 'ê': 'ee', 'ô': 'ou' };
+
+/**
+ * 罗马音 → 平假名（katakana=true 时为片假名）。非罗马字母（汉字、假名、标点）原样保留。
+ * final=false 用于「边打边转」：末尾还没打完的辅音（如 k、sh、单个 n）保留为字母，等待后续输入。
+ */
+export function romajiToKana(input, { katakana = false, final = true, caseKatakana = false } = {}) {
+  const s = String(input || '').replace(/[āīūēōâîûêô]/gi, ch => MACRON[ch.toLowerCase()] || ch);
+  const lower = s.toLowerCase();
+  let out = '';
+  let i = 0;
+  // 只对新转换出的假名应用片假名（已有的平假名 / 汉字原样保留）；caseKatakana：大写字母打出片假名
+  const emit = (kana, from) => {
+    const upper = caseKatakana && /[A-Z]/.test(s[from] || '');
+    out += (katakana || upper) ? toKatakana(kana) : kana;
+  };
+  while (i < s.length) {
+    const ch = lower[i];
+    if (!/[a-z'\-]/.test(ch)) { out += s[i]; i++; continue; }
+    if (ch === '-') {
+      // 只有紧跟在假名后的 - 才是长音
+      out += /[ぁ-ヿ]$/.test(out) ? 'ー' : '-';
+      i++;
+      continue;
+    }
+    if (ch === "'") { i++; continue; }
+    // ん：nn / n' / n + 辅音（非 y、非元音）
+    if (ch === 'n') {
+      const nx = lower[i + 1];
+      // nn + 元音：第一个 n 成为「ん」，第二个 n 与元音组成な行（konnichiha → こんにちは）
+      if (nx === 'n') { emit('ん', i); i += /[aiueoy]/.test(lower[i + 2] || '') ? 1 : 2; continue; }
+      if (nx === "'") { emit('ん', i); i += 2; continue; }
+      if (nx === undefined) { if (final) emit('ん', i); else out += s[i]; i++; continue; }
+      if (!/[aiueoy]/.test(nx)) { emit('ん', i); i++; continue; }
+    }
+    // 促音：同一辅音连写（kk、tt、ss…），或 tch
+    const nx = lower[i + 1];
+    if (nx && ch === nx && /[bcdfghjklmpqrstvwxyz]/.test(ch)) { emit('っ', i); i++; continue; }
+    if (ch === 't' && lower.startsWith('ch', i + 1)) { emit('っ', i); i++; continue; }
+    let matched = false;
+    for (let len = 4; len >= 1; len--) {
+      const part = lower.slice(i, i + len);
+      if (R2K[part]) { emit(R2K[part], i); i += len; matched = true; break; }
+    }
+    if (!matched) {
+      // 还没打完的辅音：保留原字母，等待后续输入
+      out += s[i];
+      i++;
+    }
+  }
+  return out;
+}
+
+export const hasLatin = (s) => /[A-Za-z]/.test(s || '');
+export const isKatakanaWord = (s) => /[ァ-ヺ]/.test(s || '') && !/[ぁ-ゖ㐀-鿿]/.test(s || '');
+export const isLatinWord = (s) => /^[\x20-\x7e]+$/.test(s || '') && /[A-Za-z]/.test(s || '');
+
+/**
+ * 某个词的罗马音 → 读音假名：去掉空格；词面以助词 は/へ/を 结尾时，把读作 wa/e/o 的假名还原成 は/へ/を。
+ * 词面是片假名时输出片假名。
+ */
+export function wordRomajiToKana(surface, romaji) {
+  const kata = isKatakanaWord(surface);
+  let k = romajiToKana(String(romaji || '').replace(/\s+/g, ''), { katakana: false, final: true });
+  const t = toHiragana(surface || '');
+  const last = t.slice(-1);
+  const map = { 'は': 'わ', 'へ': 'え', 'を': 'お' };
+  if (t.length > 1 && map[last] && k.endsWith(map[last])) k = k.slice(0, -1) + last;
+  // 长音：罗马音里写成元音重复（monsutaa），词面是「ー」时按词面还原（モンスター）
+  if (/ー/.test(surface || '') && expandChoon(t) === k) return surface;
+  return kata ? toKatakana(k) : k;
+}
+
+const VOWEL_KANA = { a: 'あ', i: 'い', u: 'う', e: 'え', o: 'お' };
+/** 把长音符 ー 展开成前一个假名的元音（モンスター → もんすたあ），用于比较 */
+export function expandChoon(hira) {
+  let out = '';
+  for (const ch of hira) {
+    if (ch === 'ー') {
+      const v = kanaToRomaji(out.slice(-1)).slice(-1);
+      out += VOWEL_KANA[v] || ch;
+    } else out += ch;
+  }
+  return out;
+}

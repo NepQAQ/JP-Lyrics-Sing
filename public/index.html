@@ -290,14 +290,19 @@
       <button id="le-now" class="btn small" type="button" title="把当前播放位置设为这一行的开始时间">取当前时间</button>
       <button id="le-preview" class="btn small" type="button">试听这一句</button>
     </div>
-    <label class="field"><span>原文（日语）</span><input id="le-text" class="input jp-input" lang="ja" /></label>
+    <div class="field">
+      <div class="field-label">原文（日语）
+        <label class="chk small" title="不用日语输入法：打 kaze → かぜ，大写 MONSUTA- → モンスター；含英文的行请关掉"><input id="le-text-ime" type="checkbox" /> 罗马音输入</label>
+      </div>
+      <input id="le-text" class="input jp-input" lang="ja" />
+    </div>
     <div id="le-stale" class="notice" hidden>原文已修改：保存时会自动重新分词，或 <button id="le-reanalyze" type="button" class="link">立即重新分析</button></div>
 
     <div id="le-seg" class="seg-editor">
       <div class="field-label">分词 <span class="muted small">点击字与字之间的竖线：<b>实线</b> = 词的分界（点击合并），<b>虚线</b> = 词内部（点击切开）</span></div>
       <div id="le-chars" class="seg-chars" lang="ja"></div>
       <div class="word-table-head">
-        <span>词</span><span>读音（平假 / 片假均可）</span><span>罗马音</span><span>高亮</span><span></span><span>声调</span><span>备注</span>
+        <span>词</span><span>读音（可直接打罗马音，自动转假名）</span><span>罗马音（改了会同步读音）</span><span>高亮</span><span></span><span>声调</span><span>备注</span>
       </div>
       <div id="le-words" class="word-table"></div>
       <div class="row-actions">
@@ -309,7 +314,7 @@
     </div>
 
     <div class="field">
-      <div class="field-label">整行罗马音 <label class="chk small"><input id="le-romaji-manual" type="checkbox" /> 手动覆盖（不勾选则由上面每个词的罗马音自动拼接）</label></div>
+      <div class="field-label">整行罗马音 <span class="muted small">与上面各词双向同步；增删了词时自动变为整行覆盖</span> <label class="chk small"><input id="le-romaji-manual" type="checkbox" /> 整行覆盖</label></div>
       <textarea id="le-romaji" class="input" rows="2"></textarea>
     </div>
     <label class="field"><span>中文</span><textarea id="le-zh" class="input" rows="2" lang="zh-CN"></textarea></label>

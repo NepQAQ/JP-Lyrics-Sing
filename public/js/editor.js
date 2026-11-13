@@ -9,7 +9,8 @@ import { state, sameTextLines, lineById } from './state.js';
 import { api } from './api.js';
 import { renderLineContent, rerenderPreservingScroll } from './render.js';
 import { analyzeText, readingFor, wordsMatchText, setUserDict, getUserDict, isReady, ensureTokenizer } from './analyzer.js';
-import { splitReading, wordKanaToRomaji, toHiragana, toKatakana } from './kana.js';
+import { splitReading, wordKanaToRomaji, wordRomajiToKana, toHiragana, toKatakana, isLatinWord, isKatakanaWord } from './kana.js';
+import { attachRomajiIME } from './ime.js';
 import { lyricTime, playLine } from './player.js';
 import { lineStart } from './timing.js';
 
@@ -346,14 +347,29 @@ function wordRow(w, wi) {
     return row;
   }
   const m = w.m || {};
-  const kana = h('input', { class: 'wk', value: w.k || '', placeholder: '读音（假名）', lang: 'ja', 'aria-label': `${w.t} 的读音` });
+  const latin = isLatinWord(w.t);
+  const kana = h('input', {
+    class: 'wk', value: w.k || '', lang: 'ja', 'aria-label': `${w.t} 的读音`,
+    placeholder: latin ? '（英文无需读音）' : '可直接打罗马音', disabled: latin || undefined,
+  });
   const roma = h('input', { class: 'wr', value: w.r || '', placeholder: '罗马音', 'aria-label': `${w.t} 的罗马音` });
+  // 读音框：不用日语输入法，直接打罗马音自动转假名（大写或片假名词 → 片假名）
+  if (!latin) attachRomajiIME(kana, { katakana: () => isKatakanaWord(w.t) || isKatakanaWord(w.k) });
   kana.addEventListener('input', () => {
     w.k = kana.value.trim();
-    if (!roma.dataset.manual) { w.r = wordKanaToRomaji(w.t, w.k); roma.value = w.r; }
+    // 假名 → 罗马音（还有没打完的字母时先不动罗马音）
+    if (!/[A-Za-z]/.test(w.k)) { w.r = wordKanaToRomaji(w.t, w.k); roma.value = w.r; }
     renderRomajiBox();
   });
-  roma.addEventListener('input', () => { w.r = roma.value.trim(); roma.dataset.manual = '1'; renderRomajiBox(); });
+  // 罗马音 → 假名
+  roma.addEventListener('input', () => {
+    w.r = roma.value.trim();
+    if (!latin) {
+      const k = wordRomajiToKana(w.t, w.r);
+      if (!/[A-Za-z]/.test(k)) { w.k = k; kana.value = k; }
+    }
+    renderRomajiBox();
+  });
   const hl = h('select', { class: 'whl', 'aria-label': '高亮颜色' },
     h('option', { value: '' , text: '无高亮' }),
     ...HL_COLORS.map(c => h('option', { value: c.key, text: `${c.label}色`, selected: m.hl === c.key })));
@@ -388,11 +404,51 @@ function autoRomaji() {
 
 function renderRomajiBox() {
   const ta = $('#le-romaji');
-  const manual = $('#le-romaji-manual');
-  manual.checked = ed.draft.romajiManual;
-  ta.readOnly = !ed.draft.romajiManual;
+  $('#le-romaji-manual').checked = ed.draft.romajiManual;
+  if (document.activeElement === ta) return;
   if (!ed.draft.romajiManual) ta.value = autoRomaji();
   else if (!ta.value) ta.value = ed.draft.romaji || autoRomaji();
+}
+
+/** 只刷新各词输入框的值（不重建行，避免打断正在输入的焦点） */
+function refreshWordInputs() {
+  ed.draft.words.forEach((w, wi) => {
+    const row = $(`#le-words .wrow[data-wi="${wi}"]`);
+    if (!row) return;
+    const k = row.querySelector('.wk');
+    const r = row.querySelector('.wr');
+    if (k && document.activeElement !== k) k.value = w.k || '';
+    if (r && document.activeElement !== r) r.value = w.r || '';
+  });
+}
+
+/**
+ * 整行罗马音 → 各词：空格分隔的音节组数与各词罗马音的组数一致时，逐词回填（并同步假名）；
+ * 对不上（增删了词）时视为整行手动覆盖。
+ */
+function onLineRomajiInput() {
+  const tokens = $('#le-romaji').value.trim().split(/\s+/).filter(Boolean);
+  const targets = ed.draft.words.filter(w => !w.p && w.r);
+  const counts = targets.map(w => w.r.split(/\s+/).filter(Boolean).length);
+  const total = counts.reduce((a, b) => a + b, 0);
+  if (total > 0 && tokens.length === total) {
+    let p = 0;
+    targets.forEach((w, i) => {
+      const r = tokens.slice(p, p + counts[i]).join(' ');
+      p += counts[i];
+      if (r === w.r) return;
+      w.r = r;
+      if (!isLatinWord(w.t)) {
+        const k = wordRomajiToKana(w.t, r);
+        if (!/[A-Za-z]/.test(k)) w.k = k;
+      }
+    });
+    ed.draft.romajiManual = false;
+    refreshWordInputs();
+  } else {
+    ed.draft.romajiManual = true;
+  }
+  $('#le-romaji-manual').checked = ed.draft.romajiManual;
 }
 
 async function onCharsClick(e) {
@@ -456,7 +512,8 @@ async function saveEditor() {
     fields.words = words;
     fields.wordsEdited = true;
   }
-  const romaji = ed.draft.romajiManual ? $('#le-romaji').value.trim() : null;
+  let romaji = ed.draft.romajiManual ? $('#le-romaji').value.trim() : null;
+  if (romaji && romaji.replace(/\s+/g, ' ') === autoRomaji()) romaji = null;
   if ((romaji || null) !== (line.romaji || null)) fields.romaji = romaji || null;
   if (!Object.keys(fields).length) { $('#dlg-line').close(); return; }
 
@@ -487,6 +544,8 @@ async function saveEditor() {
 
 function initLineEditor() {
   const dlg = $('#dlg-line');
+  // 原文框：可选「罗马音输入」，不用日语输入法也能改假名（含英文的歌词行请关闭）
+  attachRomajiIME($('#le-text'), { enabled: () => $('#le-text-ime').checked });
   $('#le-chars').addEventListener('click', onCharsClick);
   $('#le-text').addEventListener('input', () => {
     ed.textDirty = $('#le-text').value !== ed.draft.text;
@@ -505,9 +564,14 @@ function initLineEditor() {
   });
   $('#le-romaji-manual').addEventListener('change', e => {
     ed.draft.romajiManual = e.target.checked;
-    if (e.target.checked) $('#le-romaji').value = ed.draft.romaji || autoRomaji();
-    renderRomajiBox();
+    $('#le-romaji').value = e.target.checked ? (ed.draft.romaji || autoRomaji()) : autoRomaji();
     if (e.target.checked) $('#le-romaji').focus();
+  });
+  $('#le-romaji').addEventListener('input', onLineRomajiInput);
+  try { $('#le-text-ime').checked = localStorage.getItem('jls-text-ime') === '1'; } catch {}
+  $('#le-text-ime').addEventListener('change', e => {
+    try { localStorage.setItem('jls-text-ime', e.target.checked ? '1' : '0'); } catch {}
+    $('#le-text').focus();
   });
   $('#le-save').addEventListener('click', saveEditor);
   $('#le-cancel').addEventListener('click', () => dlg.close());

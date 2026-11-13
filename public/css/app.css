@@ -569,3 +569,15 @@ body[data-app="vocab"] .vocab { display: block; }
 .vb-ex-zh { display: block; font-family: var(--font); font-size: 12px; color: var(--muted); }
 .vb-songs { grid-column: 1 / -1; }
 .line.flash-line { animation: flash 1s ease 2; }
+
+/* ---------------------------------------------------------------- 本设备音频缓存（曲库徽章） */
+.lib-cache { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+.cache-btn { border: 1px solid var(--border); background: var(--surface); border-radius: 6px; font-size: 11.5px; padding: 1px 7px; cursor: pointer; color: var(--text-2); }
+.cache-btn:hover { border-color: var(--accent); color: var(--accent); }
+.cache-btn.ok { color: var(--ok); border-color: transparent; background: transparent; padding-left: 0; }
+.cache-btn.ok:hover { color: var(--danger); }
+.lib-cache.st-outdated .cache-btn { color: var(--warn); }
+.mini-progress { flex: 1; height: 5px; background: var(--surface-2); border-radius: 99px; overflow: hidden; max-width: 140px; }
+.mini-progress .bar { height: 100%; background: var(--accent); transition: width .2s; }
+.cache-pct { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cache-summary { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }

@@ -490,6 +490,7 @@ async function songs() {
     source: s.source,
     sourceId: s.sourceId,
     hasAudio: !!s.audio,
+    audioSize: s.audio?.size || 0,
     timeline: s.timeline,
     lineCount: (s.lines || []).length,
     editedCount: (s.lines || []).filter((l) => l.wordsEdited || l.romaji != null).length,

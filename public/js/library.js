@@ -5,12 +5,14 @@ import { api } from './api.js';
 import { openSong, updateSongHeader } from './song.js';
 import { loadSongAudio } from './player.js';
 import { readTextFile } from './editor.js';
+import { cloudAudioReady, cacheSongAudio, cacheAllAudio, removeSongAudioCache } from './cloud.js';
 
 const SOURCE_LABEL = { local: '本地', netease: '网易云', lrclib: 'LRCLIB', marumaru: 'Marumaru' };
 
 export async function refreshLibrary() {
   try {
     state.songs = await api.songs();
+    if (cloudAudioReady()) cacheIdx = new Map((await api.audioIndex()).map((r) => [r.songId, r]));
   } catch (e) {
     toast('曲库加载失败：' + e.message, { error: true });
     state.songs = [];
@@ -24,6 +26,7 @@ function renderLibrary() {
   const list = $('#lib-list');
   const items = state.songs.filter(s => !q || `${s.title} ${s.artist} ${s.album}`.toLowerCase().includes(q));
   $('#lib-count').textContent = String(state.songs.length);
+  renderCacheSummary();
   list.classList.toggle('filtering', !!q);
   if (!items.length) {
     list.replaceChildren(h('div', { class: 'lib-empty muted', text: state.songs.length ? '没有匹配的歌曲' : '曲库为空。导入本地歌曲或联网搜索歌词后会保存在这里。' }));
@@ -49,6 +52,8 @@ function renderLibrary() {
              </div>
              <button class="icon-btn tiny lib-del" type="button" aria-label="从曲库删除" title="从曲库删除">×</button>`,
     });
+    const cw = cacheWidget(s);
+    if (cw) item.querySelector('.lib-info').append(cw);
     const handle = h('span', { class: 'drag-handle', title: q ? '筛选时不能排序' : '拖动排序（登录云同步后所有设备一致）', 'aria-label': '拖动排序', html: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>' });
     item.prepend(handle);
     const open = async () => {
@@ -73,6 +78,83 @@ function renderLibrary() {
     handle.addEventListener('pointerdown', (e) => startDrag(e, item));
     return item;
   }));
+}
+
+// ---------------------------------------------------------------- 本设备音频缓存（云用户：徽章 / 全部下载 / 清除缓存）
+let cacheIdx = new Map(); // songId → { size }（api.audioIndex()，不含 Blob）
+const downloads = new Map(); // songId → { loaded, total }（cache:progress 维护）
+
+function fmtSize(n) {
+  const v = Number(n) || 0;
+  if (v >= 1024 * 1024) return (v / 1024 / 1024).toFixed(1) + ' MB';
+  if (v >= 1024) return Math.round(v / 1024) + ' KB';
+  return v + ' B';
+}
+
+/** 本设备缓存状态：none（无音频）| cached | outdated（云端尺寸变了）| missing | downloading。 */
+function cacheState(s) {
+  if (!s.hasAudio) return 'none';
+  if (downloads.has(s.id)) return 'downloading';
+  const c = cacheIdx.get(s.id);
+  if (!c) return 'missing';
+  return !s.audioSize || c.size === s.audioSize ? 'cached' : 'outdated';
+}
+
+function cacheWidget(s) {
+  if (!cloudAudioReady()) return null; // 未登录 / 云端音频未配置：完全静默
+  const st = cacheState(s);
+  if (st === 'none') return null;
+  const wrap = h('div', { class: `lib-cache st-${st}` });
+  if (st === 'cached') {
+    const btn = h('button', { type: 'button', class: 'cache-btn ok', title: '已缓存到本设备（点击删除本设备缓存，云端文件不受影响）', text: '✓ 已缓存' });
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation(); // 防误触打开歌曲
+      if (!confirm(`删除本设备上「${s.title || '未命名'}」的音频缓存？（云端文件不受影响，之后可重新下载）`)) return;
+      removeSongAudioCache(s.id).then(() => refreshLibrary()).catch(() => {});
+    });
+    wrap.append(btn);
+  } else if (st === 'downloading') {
+    const d = downloads.get(s.id);
+    const pct = d?.total ? Math.min(100, (d.loaded / d.total) * 100) : 0;
+    wrap.append(
+      h('div', { class: 'mini-progress' }, h('div', { class: 'bar', style: `width:${pct.toFixed(1)}%` })),
+      h('span', { class: 'cache-pct', text: d?.total ? `${pct.toFixed(0)}%` : '…' }),
+    );
+  } else {
+    const label = st === 'outdated' ? `↻ 更新 ${fmtSize(s.audioSize)}` : `⬇ ${fmtSize(s.audioSize)}`;
+    const btn = h('button', {
+      type: 'button', class: 'cache-btn', text: label,
+      title: st === 'outdated' ? '云端音频已更新，点击重新下载到本设备' : '音频还没缓存到本设备，点击下载（带进度）',
+    });
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      downloads.set(s.id, { loaded: 0, total: s.audioSize || 0 });
+      renderLibrary();
+      cacheSongAudio(s.id)
+        .catch(() => {}) // cache:error 已提示
+        .finally(() => { downloads.delete(s.id); renderLibrary(); });
+    });
+    wrap.append(btn);
+  }
+  return wrap;
+}
+
+function renderCacheSummary() {
+  const el = $('#lib-cache-summary');
+  if (!el) return;
+  const btn = $('#lib-download-all');
+  if (!cloudAudioReady()) { el.textContent = ''; if (btn) btn.hidden = true; return; }
+  const withAudio = state.songs.filter((s) => s.hasAudio);
+  const missing = withAudio.filter((s) => ['missing', 'outdated'].includes(cacheState(s)));
+  const cached = withAudio.filter((s) => cacheState(s) === 'cached');
+  const dl = withAudio.filter((s) => cacheState(s) === 'downloading');
+  if (btn) {
+    btn.hidden = !missing.length;
+    if (missing.length) btn.textContent = `全部下载（${missing.length} 首，${fmtSize(missing.reduce((a, s) => a + (s.audioSize || 0), 0))}）`;
+  }
+  el.textContent = withAudio.length
+    ? `本设备已缓存 ${cached.length}/${withAudio.length} 首` + (dl.length ? ` · 下载中 ${dl.length}` : '')
+    : '';
 }
 
 // ---------------------------------------------------------------- 拖拽排序（鼠标 / 触屏通用，Pointer Events）
@@ -516,4 +598,28 @@ export function initLibrary() {
   setInterval(maybeRefresh, 30000);
   bus.on('library:refresh', refreshLibrary);
   bus.on('audio:replace', replaceAudio);
+  // 本设备音频缓存：进度节流刷新列表、完成/失败收尾、云端状态或登录变化时重算徽章显隐
+  let pendingRender = false;
+  bus.on('cache:progress', ({ songId, loaded, total }) => {
+    downloads.set(songId, { loaded, total });
+    if (pendingRender) return;
+    pendingRender = true;
+    setTimeout(() => { pendingRender = false; renderLibrary(); }, 250);
+  });
+  bus.on('cache:changed', ({ songId }) => {
+    downloads.delete(songId);
+    refreshLibrary().catch(() => {});
+  });
+  bus.on('cache:error', ({ songId, error }) => {
+    downloads.delete(songId);
+    toast('音频下载失败：' + (error?.message || error), { error: true });
+    renderLibrary();
+  });
+  bus.on('cloud:status', () => refreshLibrary().catch(() => {}));
+  bus.on('auth:changed', () => refreshLibrary().catch(() => {}));
+  $('#lib-download-all')?.addEventListener('click', () => {
+    cacheAllAudio()
+      .then((n) => { if (n) toast(`已下载 ${n} 个音频到本设备`); })
+      .catch((e) => toast('全部下载失败：' + (e?.message || e), { error: true }));
+  });
 }

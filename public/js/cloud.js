@@ -335,16 +335,21 @@ async function applyRemoteSongs(remoteSongs) {
     await api.putSongRaw(song);
     applied.push(remote.songId);
 
-    // 音频：本地缺失且云端有 → 下载缓存（失败不阻断歌词同步）
+    // 音频：本地缺失或尺寸不一致（其它设备更新过）→ 下载缓存（失败不阻断歌词同步）
     if (song.audio && cloudStatus?.sharepoint) {
       const existing = await api.getAudioBlob(remote.songId);
-      if (!existing) {
+      const outdated = !!existing && Number(song.audio.size) > 0 && existing.size !== Number(song.audio.size);
+      if (!existing || outdated) {
         try {
-          const blob = await downloadAudio(remote.songId, song.audio.mime);
+          const blob = await downloadAudio(remote.songId, song.audio.mime, (loaded, total) => {
+            bus.emit('cache:progress', { songId: remote.songId, loaded, total });
+          });
           if (blob) {
             await api.putAudioRaw(remote.songId, blob, song.audio.mime, song.audio.size, song.audio.name);
+            bus.emit('cache:changed', { songId: remote.songId });
           }
-        } catch {
+        } catch (err) {
+          bus.emit('cache:error', { songId: remote.songId, error: err });
           // 音频下载失败，下次「立即同步」会重试
         }
       }
@@ -353,7 +358,7 @@ async function applyRemoteSongs(remoteSongs) {
   return applied;
 }
 
-/** 补齐本地缺失的音频缓存（「立即同步」时调用）。 */
+/** 补齐本地缺失 / 过期的音频缓存（「立即同步」时调用）。 */
 async function downloadMissingAudio() {
   if (!isLoggedIn() || !cloudStatus?.sharepoint) return 0;
   const songs = await api.rawSongs();
@@ -361,14 +366,19 @@ async function downloadMissingAudio() {
   for (const song of songs) {
     if (!song.audio) continue;
     const existing = await api.getAudioBlob(song.id);
-    if (existing) continue;
+    const outdated = !!existing && Number(song.audio.size) > 0 && existing.size !== Number(song.audio.size);
+    if (existing && !outdated) continue;
     try {
-      const blob = await downloadAudio(song.id, song.audio.mime);
+      const blob = await downloadAudio(song.id, song.audio.mime, (loaded, total) => {
+        bus.emit('cache:progress', { songId: song.id, loaded, total });
+      });
       if (blob) {
         await api.putAudioRaw(song.id, blob, song.audio.mime, song.audio.size, song.audio.name);
+        bus.emit('cache:changed', { songId: song.id });
         count++;
       }
-    } catch {
+    } catch (err) {
+      bus.emit('cache:error', { songId: song.id, error: err });
       // 单曲失败跳过
     }
   }
@@ -745,13 +755,28 @@ async function putCloudAudio(songId, blob, mime) {
   await assertOk(response, '音频上传失败');
 }
 
-async function downloadAudio(songId, mime) {
+async function downloadAudio(songId, mime, onProgress) {
   const url = `${proxyBase()}/api/cloud/audio?songId=${encodeURIComponent(songId)}&mime=${encodeURIComponent(mime || '')}`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${authToken()}` },
   });
   if (response.status === 404) return null; // 云端无此音频
   await assertOk(response, '音频下载失败');
+  // 流式读取带进度（Content-Length 缺失时 total=0，UI 显示不确定进度）
+  if (onProgress && response.body?.getReader) {
+    const total = Number(response.headers.get('Content-Length')) || 0;
+    const reader = response.body.getReader();
+    const chunks = [];
+    let loaded = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      loaded += value.length;
+      onProgress(loaded, total);
+    }
+    return new Blob(chunks);
+  }
   return await response.blob();
 }
 
@@ -772,6 +797,56 @@ async function assertOk(response, fallback) {
   err.code = data?.error?.code || 'UNKNOWN';
   err.status = response.status;
   throw err;
+}
+
+// =============================================================== 本设备音频缓存（曲库徽章 / 全部下载）
+
+/** 曲库缓存徽章的显示条件：已登录且云端音频（SharePoint）可用。 */
+export function cloudAudioReady() {
+  return isLoggedIn() && !!cloudStatus?.sharepoint;
+}
+
+/**
+ * 下载单曲音频到本设备 IndexedDB（带进度）。进度与完成经 bus 广播：
+ * cache:progress { songId, loaded, total } / cache:changed { songId } / cache:error { songId, error }。
+ * songRecord 可传 api.rawSongs() 的完整记录避免批量时重复读库。
+ */
+export async function cacheSongAudio(id, songRecord) {
+  if (!cloudAudioReady()) throw new Error('云同步未配置');
+  const song = songRecord || (await api.rawSongs()).find((s) => s?.id === id);
+  if (!song?.audio) throw new Error('该歌曲没有云端音频');
+  const blob = await downloadAudio(id, song.audio.mime, (loaded, total) => {
+    bus.emit('cache:progress', { songId: id, loaded, total });
+  });
+  if (!blob) throw new Error('云端没有这首歌曲的音频');
+  await api.putAudioRaw(id, blob, song.audio.mime, song.audio.size, song.audio.name);
+  bus.emit('cache:changed', { songId: id });
+}
+
+/** 全部下载：补齐缺失与过期的本设备缓存（顺序执行），返回处理数量。 */
+export async function cacheAllAudio() {
+  if (!cloudAudioReady()) return 0;
+  const songs = await api.rawSongs();
+  let count = 0;
+  for (const song of songs) {
+    if (!song?.audio) continue;
+    const existing = await api.getAudioBlob(song.id);
+    const outdated = !!existing && Number(song.audio.size) > 0 && existing.size !== Number(song.audio.size);
+    if (existing && !outdated) continue;
+    try {
+      await cacheSongAudio(song.id, song);
+      count++;
+    } catch {
+      // 单曲失败跳过（cache:error 已提示）
+    }
+  }
+  return count;
+}
+
+/** 清除单曲的本设备缓存（云端文件不受影响，下次同步可重新下载）。 */
+export async function removeSongAudioCache(id) {
+  await api.removeAudioBlob(id);
+  bus.emit('cache:changed', { songId: id });
 }
 
 // =============================================================== 音频签名（上传一次）
